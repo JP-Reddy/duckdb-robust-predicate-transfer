@@ -7,36 +7,21 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include "duckdb/optimizer/optimizer_extension.hpp"
+#include "duckdb/planner/operator_extension.hpp"
+#include "operators/logical_hello.hpp"
+#include "operators/physical_hello.hpp"
+#include "operators/logical_create_bf.hpp"
 
 // OpenSSL linked through vcpkg
 #include <openssl/opensslv.h>
 
 namespace duckdb {
 
-inline void RptScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &name_vector = args.data[0];
-	UnaryExecutor::Execute<string_t, string_t>(name_vector, result, args.size(), [&](string_t name) {
-		return StringVector::AddString(result, "Rpt " + name.GetString() + " 🐥");
-	});
-}
-
-inline void RptOpenSSLVersionScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &name_vector = args.data[0];
-	UnaryExecutor::Execute<string_t, string_t>(name_vector, result, args.size(), [&](string_t name) {
-		return StringVector::AddString(result, "Rpt " + name.GetString() + ", my linked OpenSSL version is " +
-		                                           OPENSSL_VERSION_TEXT);
-	});
-}
 
 static void LoadInternal(DatabaseInstance &instance) {
-	// Register a scalar function
-	auto rpt_scalar_function = ScalarFunction("rpt", {LogicalType::VARCHAR}, LogicalType::VARCHAR, RptScalarFun);
-	ExtensionUtil::RegisterFunction(instance, rpt_scalar_function);
 
-	// Register another scalar function
-	auto rpt_openssl_version_scalar_function = ScalarFunction("rpt_openssl_version", {LogicalType::VARCHAR},
-	                                                            LogicalType::VARCHAR, RptOpenSSLVersionScalarFun);
-	ExtensionUtil::RegisterFunction(instance, rpt_openssl_version_scalar_function);
+	// RegisterLogicalCreateBFOperator(instance);
 }
 
 void RptExtension::Load(DuckDB &db) {
