@@ -9,9 +9,12 @@
 
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/operator/logical_extension_operator.hpp"
+#include "dag.hpp"
 
 namespace duckdb {
+struct FilterPlan;
 class DatabaseInstance;
+class PhysicalCreateBF;
 
 class LogicalCreateBF : public LogicalExtensionOperator {
 public:
@@ -21,6 +24,12 @@ public:
 public:
 	explicit LogicalCreateBF();
 
+	bool can_stop = false;
+	vector<shared_ptr<FilterPlan>> filter_plans;
+	PhysicalCreateBF *physical = nullptr;
+
+	vector<shared_ptr<DynamicTableFilterSet>> min_max_to_create;
+	vector<vector<ColumnBinding>> min_max_applied_cols;
 	string message;
 
 public:

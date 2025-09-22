@@ -9,8 +9,8 @@
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include "duckdb/optimizer/optimizer_extension.hpp"
 #include "duckdb/planner/operator_extension.hpp"
-#include "operators/logical_hello.hpp"
-#include "operators/physical_hello.hpp"
+// #include "operators/logical_hello.hpp"
+// #include "operators/physical_hello.hpp"
 #include "operators/logical_create_bf.hpp"
 
 // OpenSSL linked through vcpkg

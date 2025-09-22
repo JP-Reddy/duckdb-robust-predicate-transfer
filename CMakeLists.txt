@@ -16,9 +16,12 @@ include_directories(src/include)
 
 set(EXTENSION_SOURCES
     src/rpt_extension.cpp
-    src/operators/logical_hello.cpp
-    src/operators/physical_hello.cpp
+#    src/operators/logical_hello.cpp
+#    src/operators/physical_hello.cpp
+    src/dag.cpp
+    src/bloom_filter.cpp
     src/operators/logical_create_bf.cpp
+    src/operators/physical_create_bf.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

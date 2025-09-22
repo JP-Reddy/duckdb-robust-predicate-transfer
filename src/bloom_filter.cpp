@@ -1,4 +1,4 @@
-#include "duckdb/optimizer/predicate_transfer/bloom_filter/bloom_filter.hpp"
+#include "bloom_filter.hpp"
 
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/storage/buffer_manager.hpp"

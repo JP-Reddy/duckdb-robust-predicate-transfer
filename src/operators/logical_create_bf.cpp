@@ -1,7 +1,11 @@
+#include "dag.hpp"
 #include "logical_create_bf.hpp"
-#include "physical_hello.hpp"
+// #include "physical_hello.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/planner/logical_operator.hpp"
+
+
 
 #include <utility>
 
@@ -29,16 +33,15 @@ void LogicalCreateBF::ResolveTypes() {
 }
 
 PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
-	// For now, create a simple physical hello operator as placeholder
-	// This is a hardcoded implementation to get compilation working
-	auto physical_hello = make_uniq<PhysicalHello>(types, message);
-
-	// Add children if any
-	for (auto &child : children) {
-		physical_hello->children.push_back(generator.CreatePlan(*child));
+	if (!physical) {
+		auto &plan = generator.CreatePlan(*children[0]);
+		auto &create_bf = generator.Make<PhysicalCreateBF>(plan.types, filter_plans, min_max_to_create,
+												 min_max_applied_cols, estimated_cardinality, can_stop);
+		physical = static_cast<PhysicalCreateBF *>(&create_bf); // Ensure safe raw pointer storage
+		create_bf.children.emplace_back(plan);
+		return create_bf; // Transfer ownership safely
 	}
-
-	return *physical_hello.release();
+	return *physical; // Ensure correct ownership
 }
 
 // void RegisterLogicalCreateBFOperatorExtension(DatabaseInstance &db) {
