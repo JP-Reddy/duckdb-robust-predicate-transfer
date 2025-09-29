@@ -25,11 +25,11 @@ InsertionOrderPreservingMap<string> LogicalCreateBF::ParamsToString() const {
 }
 
 vector<ColumnBinding> LogicalCreateBF::GetColumnBindings() {
-	return {ColumnBinding(0, 0)};
+	return children[0]->GetColumnBindings();
 }
 
 void LogicalCreateBF::ResolveTypes() {
-	types.emplace_back(LogicalType::VARCHAR);
+	types = children[0]->types;
 }
 
 PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
