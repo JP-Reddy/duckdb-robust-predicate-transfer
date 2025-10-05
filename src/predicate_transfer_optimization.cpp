@@ -8,8 +8,7 @@
 #include "operators/logical_create_bf.hpp"
 #include "operators/logical_use_bf.hpp"
 
-using namespace duckdb;
-
+namespace duckdb {
 
 static shared_ptr<FilterPlan> MakeSIPFilterPlan(Expression &build_expr, Expression &probe_expr) {
     auto plan = make_shared_ptr<FilterPlan>();
@@ -17,7 +16,6 @@ static shared_ptr<FilterPlan> MakeSIPFilterPlan(Expression &build_expr, Expressi
     plan->apply.push_back(probe_expr.Copy());
     return plan;
 }
-
 
 void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &op) {
 	for (auto &child : op->children) {
@@ -49,3 +47,5 @@ void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator
 		}
 	}
 }
+
+} // namespace duckdb
