@@ -25,21 +25,21 @@ void LogicalUseBF::ResolveTypes() {
 }
 
 PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
-	// if (!physical) {
-	// 	auto &plan = generator.CreatePlan(*children[0]);
-	// 	auto &use_bf = generator.Make<PhysicalUseBF>(plan.types, estimated_cardinality, can_stop);
-	// 	physical = static_cast<PhysicalUseBF *>(&use_bf); // Ensure safe raw pointer storage
-	// 	use_bf.children.emplace_back(plan);
-	// 	return use_bf; // Transfer ownership safely
-	// }
-	// return *physical; // Ensure correct ownership
-
 	if (!physical) {
-		physical = std::make_unique<PhysicalUseBF>(filter_plan, types);
-		for (auto &child : children) {
-			physical->children.push_back(std::move(child));
-		}
+		auto &plan = generator.CreatePlan(*children[0]);
+		auto &use_bf = generator.Make<PhysicalUseBF>(filter_plan, plan.types);
+		physical = static_cast<PhysicalUseBF *>(&use_bf); // Ensure safe raw pointer storage
+		use_bf.children.emplace_back(plan);
+		return use_bf; // Transfer ownership safely
 	}
+	return *physical; // Ensure correct ownership
+
+	// if (!physical) {
+	// 	physical = generator.Make<PhysicalUseBF>(filter_plan, types);
+	// 	for (auto &child : children) {
+	// 		physical->children.push_back(std::move(child));
+	// 	}
+	// }
 
 	return *physical;
 }

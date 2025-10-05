@@ -1,9 +1,4 @@
-
-#include "duckdb.hpp"
-#include "duckdb/execution/physical_operator.hpp"
-#include "duckdb/common/types/chunk_collection.hpp"
-#include "operators/logical_create_bf.hpp"
-#include "include/dag.hpp"
+#include "physical_create_bf.hpp"
 
 namespace duckdb {
 struct FilterPlan;

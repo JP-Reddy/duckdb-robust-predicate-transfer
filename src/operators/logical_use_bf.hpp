@@ -9,16 +9,17 @@
 
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/operator/logical_extension_operator.hpp"
-#include "include/dag.hpp"
+#include "dag.hpp"
+#include "logical_create_bf.hpp"
 
 namespace duckdb {
 struct FilterPlan;
 class DatabaseInstance;
 class PhysicalCreateBF;
 
-class LogicalUseBF : public LogicalExtensionOperator {
+class LogicalUseBF final : public LogicalExtensionOperator {
 public:
-	static constexpr const LogicalOperatorType TYPE = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
+	static constexpr auto TYPE = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
 	static constexpr auto OPERATOR_TYPE_NAME = "logical_use_bf";
 
 public:

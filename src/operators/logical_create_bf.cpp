@@ -39,7 +39,7 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 		// create_bf.children.emplace_back(plan);
 		// return create_bf; // Transfer ownership safely
 
-		auto physical = std::make_unique<PhysicalCreateBF>(filter_plans, types);
+		auto physical = generator.Make<PhysicalCreateBF>(filter_plans, types);
 		for (auto &child : children) {
 			physical->children.push_back(std::move(child));
 		}

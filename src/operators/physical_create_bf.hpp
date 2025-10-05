@@ -1,9 +1,8 @@
 #include "duckdb.hpp"
 #include "logical_create_bf.hpp"
 #include "duckdb/execution/physical_operator.hpp"
-#include "duckdb/common/types/chunk_collection.hpp"
-#include "operators/logical_create_bf.hpp"
-#include "include/dag.hpp"
+#include "logical_create_bf.hpp"
+#include "dag.hpp"
 
 using namespace duckdb;
 

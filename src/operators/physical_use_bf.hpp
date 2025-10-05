@@ -1,13 +1,13 @@
 #include "duckdb.hpp"
 #include "logical_create_bf.hpp"
 #include "duckdb/execution/physical_operator.hpp"
-#include "duckdb/common/types/chunk_collection.hpp"
-#include "operators/logical_use_bf.hpp"
-#include "include/dag.hpp"
+// #include "duckdb/common/types/chunk_collection.hpp"
+#include "logical_use_bf.hpp"
+#include "dag.hpp"
 
 using namespace duckdb;
 
-class PhysicalUseBF : public CachingPhysicalOperator {
+class PhysicalUseBF : public PhysicalOperator {
 public:
 	static constexpr auto TYPE = PhysicalOperatorType::EXTENSION;
 

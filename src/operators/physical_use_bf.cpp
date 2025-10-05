@@ -1,7 +1,4 @@
-#include "duckdb.hpp"
-#include "duckdb/execution/physical_operator.hpp"
-#include "duckdb/planner/operator/logical_use_bf.hpp"
-#include "duckdb/optimizer/predicate_transfer/dag.hpp"
+#include "physical_use_bf.hpp"
 
 namespace duckdb {
 struct FilterPlan;
