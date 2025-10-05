@@ -1,6 +1,7 @@
 
 #include "duckdb.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
+#include "duckdb/optimizer/optimizer_extension.hpp"
 
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "include/dag.hpp"
@@ -10,17 +11,17 @@
 using namespace duckdb;
 
 
-static std::shared_ptr<FilterPlan> MakeSIPFilterPlan(Expression &build_expr, Expression &probe_expr) {
-    auto plan = std::make_shared<FilterPlan>();
+static shared_ptr<FilterPlan> MakeSIPFilterPlan(Expression &build_expr, Expression &probe_expr) {
+    auto plan = make_shared_ptr<FilterPlan>();
     plan->build.push_back(build_expr.Copy());
     plan->apply.push_back(probe_expr.Copy());
     return plan;
 }
 
 
-void SIPOptimizerRule(std::unique_ptr<LogicalOperator> &op) {
+void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &op) {
 	for (auto &child : op->children) {
-		SIPOptimizerRule(child);
+		SIPOptimizerRule(input, child);
 	}
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
 		auto &join = op->Cast<LogicalComparisonJoin>();
@@ -34,7 +35,7 @@ void SIPOptimizerRule(std::unique_ptr<LogicalOperator> &op) {
 
 				// Insert LogicalCreateBF on build side (left child)
 				auto create_bf = make_uniq<LogicalCreateBF>(
-					std::vector<std::shared_ptr<FilterPlan>>{bf_plan});
+					vector<shared_ptr<FilterPlan>>{bf_plan});
 				create_bf->AddChild(std::move(join.children[0]));
 				join.children[0] = std::move(create_bf);
 

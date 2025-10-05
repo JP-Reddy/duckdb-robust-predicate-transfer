@@ -43,7 +43,7 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 			auto &child_physical = generator.CreatePlan(*child);
 			physical_op.children.emplace_back(child_physical);
 		}
-		physical = &physical_op;
+		physical = static_cast<PhysicalCreateBF*>(&physical_op);
 		return physical_op;
 	}
 	return *physical;

@@ -32,7 +32,7 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 	if (!physical) {
 		auto &plan = generator.CreatePlan(*children[0]);
 		auto &use_bf = generator.Make<PhysicalUseBF>(filter_plan, plan.types, estimated_cardinality);
-		physical = &use_bf;
+		physical = static_cast<PhysicalUseBF*>(&use_bf);
 		use_bf.children.emplace_back(plan);
 		return use_bf;
 	}
