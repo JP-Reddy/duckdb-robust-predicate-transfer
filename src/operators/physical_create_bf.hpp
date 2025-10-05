@@ -1,15 +1,17 @@
-#include "duckdb.hpp"
+#pragma once
+
 #include "duckdb/execution/physical_operator.hpp"
 #include "dag.hpp"
 
-using namespace duckdb;
+namespace duckdb {
 
 class PhysicalCreateBF : public PhysicalOperator {
 public:
-	static constexpr auto TYPE = PhysicalOperatorType::EXTENSION;
+	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 public:
-	PhysicalCreateBF(vector<LogicalType> types, const vector<shared_ptr<FilterPlan>> &filter_plans);
+	PhysicalCreateBF(const vector<shared_ptr<FilterPlan>> &filter_plans, vector<LogicalType> types, 
+	                 idx_t estimated_cardinality);
 
 	// Required virtual methods
 	virtual ~PhysicalCreateBF() = default;
@@ -22,7 +24,8 @@ public:
 	                          GlobalOperatorState &gstate, OperatorState &state) const override;
 
 public:
+	vector<shared_ptr<FilterPlan>> filter_plans;
 	bool is_probing_side;
-	std::vector<std::shared_ptr<FilterPlan>> filter_plans;
-	idx_t estimated_cardinality;
 };
+
+} // namespace duckdb

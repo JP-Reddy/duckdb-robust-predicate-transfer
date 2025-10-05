@@ -33,13 +33,13 @@ void SIPOptimizerRule(std::unique_ptr<LogicalOperator> &op) {
 				auto bf_plan = MakeSIPFilterPlan(*cond.left, *cond.right);
 
 				// Insert LogicalCreateBF on build side (left child)
-				auto create_bf = std::make_unique<LogicalCreateBF>(
+				auto create_bf = make_uniq<LogicalCreateBF>(
 					std::vector<std::shared_ptr<FilterPlan>>{bf_plan});
 				create_bf->AddChild(std::move(join.children[0]));
 				join.children[0] = std::move(create_bf);
 
 				// Insert LogicalUseBF on probe side (right child)
-				auto use_bf = std::make_unique<LogicalUseBF>(bf_plan);
+				auto use_bf = make_uniq<LogicalUseBF>(bf_plan);
 				use_bf->AddChild(std::move(join.children[1]));
 				join.children[1] = std::move(use_bf);
 

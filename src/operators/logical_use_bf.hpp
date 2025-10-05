@@ -19,11 +19,12 @@ class PhysicalUseBF;
 
 class LogicalUseBF final : public LogicalExtensionOperator {
 public:
-	static constexpr auto TYPE = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
+	static constexpr const LogicalOperatorType TYPE = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
 	static constexpr auto OPERATOR_TYPE_NAME = "logical_use_bf";
 
 public:
 	explicit LogicalUseBF();
+	explicit LogicalUseBF(shared_ptr<FilterPlan> filter_plan);
 
 	shared_ptr<FilterPlan> filter_plan;
 	LogicalCreateBF *related_create_bf = nullptr;

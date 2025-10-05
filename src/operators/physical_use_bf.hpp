@@ -8,10 +8,10 @@ namespace duckdb {
 
 class PhysicalUseBF : public PhysicalOperator {
 public:
-	static constexpr auto TYPE = PhysicalOperatorType::EXTENSION;
+	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 public:
-	PhysicalUseBF(std::shared_ptr<FilterPlan> filter_plan, std::vector<LogicalType> types_p);
+	PhysicalUseBF(shared_ptr<FilterPlan> filter_plan, vector<LogicalType> types, idx_t estimated_cardinality);
 
 	// Required virtual methods
 	virtual ~PhysicalUseBF() = default;
@@ -24,9 +24,8 @@ public:
 	                          GlobalOperatorState &gstate, OperatorState &state) const override;
 
 public:
-	std::shared_ptr<FilterPlan> filter_plan;
+	shared_ptr<FilterPlan> filter_plan;
 	bool is_probing_side;
-	idx_t estimated_cardinality;
 };
 
 } // namespace duckdb

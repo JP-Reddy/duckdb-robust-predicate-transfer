@@ -23,6 +23,7 @@ public:
 
 public:
 	explicit LogicalCreateBF();
+	explicit LogicalCreateBF(vector<shared_ptr<FilterPlan>> filter_plans);
 
 	bool can_stop = false;
 	vector<shared_ptr<FilterPlan>> filter_plans;

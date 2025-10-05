@@ -5,7 +5,11 @@ namespace duckdb {
 
 LogicalUseBF::LogicalUseBF() : LogicalExtensionOperator() {
 	this->type = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
-	// message = "USE_BF";
+}
+
+LogicalUseBF::LogicalUseBF(shared_ptr<FilterPlan> filter_plan) 
+    : LogicalExtensionOperator(), filter_plan(std::move(filter_plan)) {
+	this->type = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
 }
 
 
@@ -27,12 +31,12 @@ void LogicalUseBF::ResolveTypes() {
 PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
 	if (!physical) {
 		auto &plan = generator.CreatePlan(*children[0]);
-		auto &use_bf = generator.Make<PhysicalUseBF>(filter_plan, plan.types);
-		physical = static_cast<PhysicalUseBF*>(&use_bf);
+		auto &use_bf = generator.Make<PhysicalUseBF>(filter_plan, plan.types, estimated_cardinality);
+		physical = &use_bf;
 		use_bf.children.emplace_back(plan);
-		return static_cast<PhysicalOperator&>(use_bf);
+		return use_bf;
 	}
-	return static_cast<PhysicalOperator&>(*physical);
+	return *physical;
 }
 
 // void RegisterLogicalUseBFOperatorExtension(DatabaseInstance &db) {

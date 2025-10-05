@@ -3,9 +3,10 @@
 
 namespace duckdb {
 
-PhysicalCreateBF::PhysicalCreateBF(vector<LogicalType> types, const vector<shared_ptr<FilterPlan>> &filter_plans)
-    : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), 1),
-      filter_plans(filter_plans), is_probing_side(false), estimated_cardinality(1) {
+PhysicalCreateBF::PhysicalCreateBF(const vector<shared_ptr<FilterPlan>> &filter_plans, vector<LogicalType> types, 
+                                   idx_t estimated_cardinality)
+    : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
+      filter_plans(filter_plans), is_probing_side(false) {
 }
 
 string PhysicalCreateBF::GetName() const {
