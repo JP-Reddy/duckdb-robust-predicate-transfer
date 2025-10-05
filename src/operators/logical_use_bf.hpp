@@ -1,0 +1,48 @@
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// operator/logical_use_bf.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+#pragma once
+
+#include "duckdb/planner/logical_operator.hpp"
+#include "duckdb/planner/operator/logical_extension_operator.hpp"
+#include "include/dag.hpp"
+
+namespace duckdb {
+struct FilterPlan;
+class DatabaseInstance;
+class PhysicalCreateBF;
+
+class LogicalUseBF : public LogicalExtensionOperator {
+public:
+	static constexpr const LogicalOperatorType TYPE = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
+	static constexpr auto OPERATOR_TYPE_NAME = "logical_use_bf";
+
+public:
+	explicit LogicalUseBF();
+
+	shared_ptr<FilterPlan> filter_plan;
+	LogicalCreateBF *related_create_bf = nullptr;
+
+	PhysicalCreateBF *physical = nullptr;
+
+public:
+
+	string GetExtensionName() const override {
+		return "rpt";
+	}
+	InsertionOrderPreservingMap<string> ParamsToString() const override;
+	vector<ColumnBinding> GetColumnBindings() override;
+
+	PhysicalOperator &CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) override;
+
+protected:
+	void ResolveTypes() override;
+};
+
+// void RegisterLogicalUseBFOperatorExtension(DatabaseInstance &instance);
+
+} // namespace duckdb

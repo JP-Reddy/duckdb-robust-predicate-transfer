@@ -22,6 +22,8 @@ set(EXTENSION_SOURCES
     src/bloom_filter.cpp
     src/operators/logical_create_bf.cpp
     src/operators/physical_create_bf.cpp
+    src/operators/logical_use_bf.cpp
+    src/operators/physical_use_bf.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

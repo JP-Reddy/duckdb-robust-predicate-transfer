@@ -12,6 +12,7 @@
 // #include "operators/logical_hello.hpp"
 // #include "operators/physical_hello.hpp"
 #include "operators/logical_create_bf.hpp"
+#include "predicate_transfer_optimization.cpp"
 
 // OpenSSL linked through vcpkg
 #include <openssl/opensslv.h>
@@ -22,6 +23,7 @@ namespace duckdb {
 static void LoadInternal(DatabaseInstance &instance) {
 
 	// RegisterLogicalCreateBFOperator(instance);
+	instance.config.AddOptimizer(your_optimizer_function);
 }
 
 void RptExtension::Load(DuckDB &db) {
@@ -56,3 +58,13 @@ DUCKDB_EXTENSION_API const char *rpt_version() {
 #ifndef DUCKDB_EXTENSION_MAIN
 #error DUCKDB_EXTENSION_MAIN not defined
 #endif
+
+
+void RptOptimizer::Register(ExtensionLoader &loader) {
+
+	OptimizerExtension optimizer;
+	optimizer.optimize_function = SIPOptimizerRule;
+
+	auto &db = loader.GetDatabaseInstance();
+	db.config.optimizer_extensions.push_back(optimizer);
+}

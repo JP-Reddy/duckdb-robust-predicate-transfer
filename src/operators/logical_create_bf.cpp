@@ -16,8 +16,6 @@ LogicalCreateBF::LogicalCreateBF() : LogicalExtensionOperator() {
 	message = "CREATE_BF";
 }
 
-
-
 InsertionOrderPreservingMap<string> LogicalCreateBF::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
 	result["Operator"] = "LogicalCreateBF";
@@ -34,12 +32,17 @@ void LogicalCreateBF::ResolveTypes() {
 
 PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
 	if (!physical) {
-		auto &plan = generator.CreatePlan(*children[0]);
-		auto &create_bf = generator.Make<PhysicalCreateBF>(plan.types, filter_plans, min_max_to_create,
-												 min_max_applied_cols, estimated_cardinality, can_stop);
-		physical = static_cast<PhysicalCreateBF *>(&create_bf); // Ensure safe raw pointer storage
-		create_bf.children.emplace_back(plan);
-		return create_bf; // Transfer ownership safely
+		// auto &plan = generator.CreatePlan(*children[0]);
+		// auto &create_bf = generator.Make<PhysicalCreateBF>(plan.types, filter_plans, min_max_to_create,
+		// 										 min_max_applied_cols, estimated_cardinality, can_stop);
+		// physical = static_cast<PhysicalCreateBF *>(&create_bf); // Ensure safe raw pointer storage
+		// create_bf.children.emplace_back(plan);
+		// return create_bf; // Transfer ownership safely
+
+		auto physical = std::make_unique<PhysicalCreateBF>(filter_plans, types);
+		for (auto &child : children) {
+			physical->children.push_back(std::move(child));
+		}
 	}
 	return *physical; // Ensure correct ownership
 }

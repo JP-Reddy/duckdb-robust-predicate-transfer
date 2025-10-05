@@ -2,17 +2,17 @@
 #include "logical_create_bf.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/common/types/chunk_collection.hpp"
-#include "operators/logical_create_bf.hpp"
+#include "operators/logical_use_bf.hpp"
 #include "include/dag.hpp"
 
 using namespace duckdb;
 
-class PhysicalCreateBF : public PhysicalOperator {
+class PhysicalUseBF : public CachingPhysicalOperator {
 public:
 	static constexpr auto TYPE = PhysicalOperatorType::EXTENSION;
 
 public:
-	PhysicalCreateBF(vector<LogicalType> types, const vector<shared_ptr<FilterPlan>> &filter_plans);
+	PhysicalUseBF(std::shared_ptr<FilterPlan> filter_plan, std::vector<LogicalType> types_p);
 
 public:
 	bool is_probing_side;
