@@ -1,6 +1,6 @@
 #include "logical_use_bf.hpp"
+#include "physical_use_bf.hpp"
 
-class PhysicalUseBF;
 namespace duckdb {
 
 LogicalUseBF::LogicalUseBF() : LogicalExtensionOperator() {

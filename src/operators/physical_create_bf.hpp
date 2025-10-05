@@ -13,6 +13,13 @@ public:
 public:
 	PhysicalCreateBF(vector<LogicalType> types, const vector<shared_ptr<FilterPlan>> &filter_plans);
 
+	// Required virtual methods
+	virtual ~PhysicalCreateBF() = default;
+
+	string GetName() const override;
+	string ToString() const override;
+	unique_ptr<PhysicalOperator> Clone() const override;
+
 public:
 	bool is_probing_side;
 	std::vector<std::shared_ptr<FilterPlan>> filter_plans;

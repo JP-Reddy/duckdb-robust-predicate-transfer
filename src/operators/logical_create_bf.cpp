@@ -4,7 +4,7 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/planner/logical_operator.hpp"
-
+#include "physical_create_bf.hpp"
 
 
 #include <utility>
@@ -39,10 +39,13 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 		// create_bf.children.emplace_back(plan);
 		// return create_bf; // Transfer ownership safely
 
-		auto physical = generator.Make<PhysicalCreateBF>(filter_plans, types);
+		auto &physical_op = generator.Make<PhysicalCreateBF>(filter_plans, types);
 		for (auto &child : children) {
-			physical->children.push_back(std::move(child));
+			auto &child_physical = generator.CreatePlan(*child);
+			physical_op.children.push_back(std::move(child_physical));
 		}
+		physical = static_cast<PhysicalCreateBF *>(&physical_op);
+		return physical_op;
 	}
 	return *physical; // Ensure correct ownership
 }
