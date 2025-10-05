@@ -15,7 +15,7 @@
 namespace duckdb {
 struct FilterPlan;
 class DatabaseInstance;
-class PhysicalCreateBF;
+class PhysicalUseBF;
 
 class LogicalUseBF final : public LogicalExtensionOperator {
 public:
@@ -28,7 +28,7 @@ public:
 	shared_ptr<FilterPlan> filter_plan;
 	LogicalCreateBF *related_create_bf = nullptr;
 
-	PhysicalCreateBF *physical = nullptr;
+	PhysicalUseBF *physical = nullptr;
 
 public:
 

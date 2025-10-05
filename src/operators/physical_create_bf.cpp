@@ -1,29 +1,32 @@
 #include "physical_create_bf.hpp"
+#include "dag.hpp"
 
 namespace duckdb {
-struct FilterPlan;
+
+PhysicalCreateBF::PhysicalCreateBF(vector<LogicalType> types, const vector<shared_ptr<FilterPlan>> &filter_plans)
+    : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), 1),
+      filter_plans(filter_plans), is_probing_side(false), estimated_cardinality(1) {
 }
-using namespace duckdb;
 
-class PhysicalCreateBF : public PhysicalOperator {
-public:
+string PhysicalCreateBF::GetName() const {
+    return "CREATE_BF";
+}
 
+string PhysicalCreateBF::ToString(ExplainFormat format) const {
+    return "CREATE_BF";
+}
 
-	PhysicalCreateBF(std::vector<std::shared_ptr<FilterPlan>> filter_plans_p, std::vector<LogicalType> types_p)
-		: PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types_p), 1 ), filter_plans(std::move(filter_plans_p)) {}
+OperatorResultType PhysicalCreateBF::Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
+                                            GlobalOperatorState &gstate, OperatorState &state) const {
+    // Pass through all input rows (no actual filtering in this example)
+    if (!children.empty()) {
+        return children[0].get().Execute(context, input, chunk, gstate, state);
+    }
+    
+    // Here you would build the Bloom filter using filter_plans and chunk data.
+    // For now, this is just a passthrough.
+    chunk.Reference(input);
+    return OperatorResultType::HAVE_MORE_OUTPUT;
+}
 
-	// Standard DuckDB operator method
-	OperatorResultType Execute(ExecutionContext &context, DataChunk &chunk, OperatorState &state, GlobalOperatorState &gstate) override {
-		// Pass through all input rows (no actual filtering in this example)
-		if (!children.empty()) {
-			children[0]->Execute(context, chunk, state, gstate);
-		}
-		// Here you would build the Bloom filter using filter_plans and chunk data.
-		// For now, this is just a passthrough.
-		return OperatorResultType::NEED_MORE_INPUT;
-	}
-
-	std::unique_ptr<PhysicalOperator> Clone() override {
-		return std::make_unique<PhysicalCreateBF>(filter_plans, types, estimated_cardinality);
-	}
-};
+} // namespace duckdb

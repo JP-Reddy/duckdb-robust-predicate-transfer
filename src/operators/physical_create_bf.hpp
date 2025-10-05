@@ -1,7 +1,5 @@
 #include "duckdb.hpp"
-#include "logical_create_bf.hpp"
 #include "duckdb/execution/physical_operator.hpp"
-#include "logical_create_bf.hpp"
 #include "dag.hpp"
 
 using namespace duckdb;
@@ -17,8 +15,11 @@ public:
 	virtual ~PhysicalCreateBF() = default;
 
 	string GetName() const override;
-	string ToString() const override;
-	unique_ptr<PhysicalOperator> Clone() const override;
+	string ToString(ExplainFormat format = ExplainFormat::DEFAULT) const override;
+	
+	// Operator interface
+	OperatorResultType Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
+	                          GlobalOperatorState &gstate, OperatorState &state) const override;
 
 public:
 	bool is_probing_side;

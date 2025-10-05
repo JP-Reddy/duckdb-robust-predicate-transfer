@@ -1,11 +1,10 @@
+#pragma once
+
 #include "duckdb.hpp"
-#include "logical_create_bf.hpp"
 #include "duckdb/execution/physical_operator.hpp"
-// #include "duckdb/common/types/chunk_collection.hpp"
-#include "logical_use_bf.hpp"
 #include "dag.hpp"
 
-using namespace duckdb;
+namespace duckdb {
 
 class PhysicalUseBF : public PhysicalOperator {
 public:
@@ -14,8 +13,20 @@ public:
 public:
 	PhysicalUseBF(std::shared_ptr<FilterPlan> filter_plan, std::vector<LogicalType> types_p);
 
+	// Required virtual methods
+	virtual ~PhysicalUseBF() = default;
+
+	string GetName() const override;
+	string ToString(ExplainFormat format = ExplainFormat::DEFAULT) const override;
+	
+	// Operator interface
+	OperatorResultType Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
+	                          GlobalOperatorState &gstate, OperatorState &state) const override;
+
 public:
+	std::shared_ptr<FilterPlan> filter_plan;
 	bool is_probing_side;
-	std::vector<std::shared_ptr<FilterPlan>> filter_plans;
 	idx_t estimated_cardinality;
 };
+
+} // namespace duckdb

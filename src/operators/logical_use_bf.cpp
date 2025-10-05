@@ -28,20 +28,11 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 	if (!physical) {
 		auto &plan = generator.CreatePlan(*children[0]);
 		auto &use_bf = generator.Make<PhysicalUseBF>(filter_plan, plan.types);
-		physical = static_cast<PhysicalUseBF *>(&use_bf); // Ensure safe raw pointer storage
+		physical = static_cast<PhysicalUseBF*>(&use_bf);
 		use_bf.children.emplace_back(plan);
-		return use_bf; // Transfer ownership safely
+		return static_cast<PhysicalOperator&>(use_bf);
 	}
-	return *physical; // Ensure correct ownership
-
-	// if (!physical) {
-	// 	physical = generator.Make<PhysicalUseBF>(filter_plan, types);
-	// 	for (auto &child : children) {
-	// 		physical->children.push_back(std::move(child));
-	// 	}
-	// }
-
-	return *physical;
+	return static_cast<PhysicalOperator&>(*physical);
 }
 
 // void RegisterLogicalUseBFOperatorExtension(DatabaseInstance &db) {
