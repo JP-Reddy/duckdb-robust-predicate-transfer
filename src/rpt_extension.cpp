@@ -12,6 +12,7 @@
 // #include "operators/logical_hello.hpp"
 // #include "operators/physical_hello.hpp"
 #include "operators/logical_create_bf.hpp"
+#include "operators/logical_use_bf.hpp"
 #include "predicate_transfer_optimization.hpp"
 
 // OpenSSL linked through vcpkg
@@ -19,12 +20,37 @@
 
 namespace duckdb {
 
+class CreateBFOperatorExtension : public OperatorExtension {
+public:
+	std::string GetName() override {
+		return "logical_create_bf";
+	}
+	
+	unique_ptr<LogicalExtensionOperator> Deserialize(Deserializer &deserializer) override {
+		return make_uniq<LogicalCreateBF>();
+	}
+};
+
+class UseBFOperatorExtension : public OperatorExtension {
+public:
+	std::string GetName() override {
+		return "logical_use_bf";
+	}
+	
+	unique_ptr<LogicalExtensionOperator> Deserialize(Deserializer &deserializer) override {
+		return make_uniq<LogicalUseBF>();
+	}
+};
 
 static void LoadInternal(DatabaseInstance &instance) {
 	// Register the SIP optimizer rule
 	OptimizerExtension optimizer;
 	optimizer.optimize_function = SIPOptimizerRule;
 	instance.config.optimizer_extensions.push_back(optimizer);
+	
+	// Register logical operators
+	instance.config.operator_extensions.push_back(make_uniq<CreateBFOperatorExtension>());
+	instance.config.operator_extensions.push_back(make_uniq<UseBFOperatorExtension>());
 }
 
 void RptExtension::Load(DuckDB &db) {
