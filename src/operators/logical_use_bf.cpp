@@ -17,6 +17,26 @@ LogicalUseBF::LogicalUseBF(shared_ptr<FilterPlan> filter_plan)
 InsertionOrderPreservingMap<string> LogicalUseBF::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
 	result["Operator"] = "LogicalUseBF";
+	
+	if (filter_plan) {
+		result["Build Expressions"] = std::to_string(filter_plan->build.size());
+		result["Apply Expressions"] = std::to_string(filter_plan->apply.size());
+		result["Build Columns"] = std::to_string(filter_plan->bound_cols_build.size());
+		result["Apply Columns"] = std::to_string(filter_plan->bound_cols_apply.size());
+	} else {
+		result["Filter Plan"] = "NULL";
+	}
+	
+	if (related_create_bf) {
+		result["Related CreateBF"] = "Present";
+	} else {
+		result["Related CreateBF"] = "NULL";
+	}
+	
+	if (estimated_cardinality != DConstants::INVALID_INDEX) {
+		result["Estimated Cardinality"] = std::to_string(estimated_cardinality);
+	}
+	
 	return result;
 }
 

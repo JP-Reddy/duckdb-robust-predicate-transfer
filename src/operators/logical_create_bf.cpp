@@ -25,6 +25,23 @@ LogicalCreateBF::LogicalCreateBF(vector<shared_ptr<FilterPlan>> filter_plans)
 InsertionOrderPreservingMap<string> LogicalCreateBF::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
 	result["Operator"] = "LogicalCreateBF";
+	result["Filter Plans"] = std::to_string(filter_plans.size());
+	
+	// Add details about each filter plan
+	for (size_t i = 0; i < filter_plans.size(); i++) {
+		auto &plan = filter_plans[i];
+		if (plan) {
+			result["Build Expressions " + std::to_string(i)] = std::to_string(plan->build.size());
+			result["Apply Expressions " + std::to_string(i)] = std::to_string(plan->apply.size());
+			result["Build Columns " + std::to_string(i)] = std::to_string(plan->bound_cols_build.size());
+			result["Apply Columns " + std::to_string(i)] = std::to_string(plan->bound_cols_apply.size());
+		}
+	}
+	
+	if (estimated_cardinality != DConstants::INVALID_INDEX) {
+		result["Estimated Cardinality"] = std::to_string(estimated_cardinality);
+	}
+	
 	return result;
 }
 
