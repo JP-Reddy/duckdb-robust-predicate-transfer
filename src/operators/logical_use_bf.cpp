@@ -45,7 +45,11 @@ vector<ColumnBinding> LogicalUseBF::GetColumnBindings() {
 }
 
 void LogicalUseBF::ResolveTypes() {
-	types = children[0]->types;
+	Printer::Print("Resolving types for LogicalUseBF");
+	// if (!children.empty() && children[0]) {
+		// Printer::Print("Resolving types for LogicalUseBF: children[0]");
+		types = children[0]->types;
+	// }
 }
 
 PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
@@ -53,6 +57,12 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 		auto &plan = generator.CreatePlan(*children[0]);
 		auto &use_bf = generator.Make<PhysicalUseBF>(filter_plan, plan.types, estimated_cardinality);
 		physical = static_cast<PhysicalUseBF*>(&use_bf);
+		
+		// Set up reference to related PhysicalCreateBF if available
+		if (related_create_bf && related_create_bf->physical) {
+			physical->related_create_bf = related_create_bf->physical;
+		}
+		
 		use_bf.children.emplace_back(plan);
 		return use_bf;
 	}

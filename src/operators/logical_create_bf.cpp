@@ -50,7 +50,9 @@ vector<ColumnBinding> LogicalCreateBF::GetColumnBindings() {
 }
 
 void LogicalCreateBF::ResolveTypes() {
-	types = children[0]->types;
+	if (!children.empty() && children[0]) {
+		types = children[0]->types;
+	}
 }
 
 PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {

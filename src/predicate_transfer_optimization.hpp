@@ -5,7 +5,7 @@
 
 namespace duckdb {
 
-// Function declaration - implementation is in predicate_transfer_optimization.cpp
+
 void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &op);
 
 } // namespace duckdb

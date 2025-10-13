@@ -14,6 +14,18 @@ static shared_ptr<FilterPlan> MakeSIPFilterPlan(Expression &build_expr, Expressi
     auto plan = make_shared_ptr<FilterPlan>();
     plan->build.push_back(build_expr.Copy());
     plan->apply.push_back(probe_expr.Copy());
+    
+    // Extract bound column indices from the expressions
+    if (build_expr.type == ExpressionType::BOUND_COLUMN_REF) {
+        auto &build_col_ref = build_expr.Cast<BoundColumnRefExpression>();
+        plan->bound_cols_build.push_back(build_col_ref.binding.column_index);
+    }
+    
+    if (probe_expr.type == ExpressionType::BOUND_COLUMN_REF) {
+        auto &probe_col_ref = probe_expr.Cast<BoundColumnRefExpression>();
+        plan->bound_cols_apply.push_back(probe_col_ref.binding.column_index);
+    }
+    
     return plan;
 }
 
@@ -35,11 +47,15 @@ void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator
 				auto create_bf = make_uniq<LogicalCreateBF>(
 					vector<shared_ptr<FilterPlan>>{bf_plan});
 				create_bf->AddChild(std::move(join.children[0]));
-				join.children[0] = std::move(create_bf);
-
+				
 				// Insert LogicalUseBF on probe side (right child)
 				auto use_bf = make_uniq<LogicalUseBF>(bf_plan);
 				use_bf->AddChild(std::move(join.children[1]));
+				
+				// Establish relationship between create and use operators
+				use_bf->related_create_bf = create_bf.get();
+				
+				join.children[0] = std::move(create_bf);
 				join.children[1] = std::move(use_bf);
 
 				break;
