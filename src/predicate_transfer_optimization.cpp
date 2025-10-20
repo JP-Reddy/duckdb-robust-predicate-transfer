@@ -83,12 +83,12 @@ void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator
 
 namespace duckdb {
 
-void PredicateTransferOptimizer::PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+unique_ptr<LogicalOperator> PredicateTransferOptimizer::PreOptimize(unique_ptr<LogicalOperator> &plan) {
 	graph_manager.Build(*plan);
-	//return plan;
+	return std::move(plan);
 }
 
-void PredicateTransferOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+unique_ptr<LogicalOperator> PredicateTransferOptimizer::Optimize(unique_ptr<LogicalOperator> &plan) {
 	auto &ordered_nodes = graph_manager.transfer_order;
 
 	// **Forward pass**: Process nodes in reverse order (from last to first)
@@ -119,7 +119,7 @@ void PredicateTransferOptimizer::Optimize(OptimizerExtensionInput &input, unique
 		}
 	}
 
-	//return InsertTransferOperators(std::move(plan));
+	return InsertTransferOperators(std::move(plan));
 }
 
 unique_ptr<LogicalOperator> PredicateTransferOptimizer::InsertTransferOperators(unique_ptr<LogicalOperator> plan) {
@@ -340,4 +340,27 @@ void PredicateTransferOptimizer::GetColumnBindingExpression(Expression &expr,
 		    expr, [&](unique_ptr<Expression> &child) { GetColumnBindingExpression(*child, expressions); });
 	}
 }
+
+void PredicateTransferOptimizer::PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+	// create or get existing optimizer state using proper DuckDB state management
+	auto optimizer_state = input.context.registered_state->GetOrCreate<PredicateTransferOptimizer>(
+		"rpt_optimizer_state", input.context);
+
+	plan = optimizer_state->PreOptimize(plan);
+}
+
+void PredicateTransferOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+	// retrieve the optimizer state from ClientContext
+	auto optimizer_state = input.context.registered_state->Get<PredicateTransferOptimizer>("rpt_optimizer_state");
+	if (!optimizer_state) {
+		optimizer_state = input.context.registered_state->GetOrCreate<PredicateTransferOptimizer>(
+			"rpt_optimizer_state", input.context);
+	}
+
+	plan = optimizer_state->Optimize(plan);
+	
+	// cleanup
+	input.context.registered_state->Remove("rpt_optimizer_state");
+}
+
 } // namespace duckdb

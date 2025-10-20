@@ -17,22 +17,28 @@
 #include "transfer_graph_manager.hpp"
 #include "operators/logical_create_bf.hpp"
 #include "operators/logical_use_bf.hpp"
+#include "duckdb/optimizer/optimizer_extension.hpp"
+#include "duckdb/main/client_context_state.hpp"
 
 namespace duckdb {
 using BloomFilters = vector<shared_ptr<BloomFilter>>;
 
-class PredicateTransferOptimizer {
+class PredicateTransferOptimizer : public ClientContextState {
 public:
 	explicit PredicateTransferOptimizer(ClientContext &context) : graph_manager(context) {
 	}
 
 	//! Extract the query join information, note that this function must be called before join order optimization,
 	//! because some join conditions are lost during join order optimization.
-	void PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan);
+	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> &plan);
 
 	//! Create bloom filters and insert them into the query plan, note that this function must be called after join
 	//! order optimization, because it cannot handle newly inserted operator correctly.
-	void Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan);
+	unique_ptr<LogicalOperator> Optimize(unique_ptr<LogicalOperator> &plan);
+
+	//! Static functions for extension framework integration
+	static void PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan);
+	static void Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan);
 
 private:
 	unique_ptr<LogicalOperator> InsertTransferOperators(unique_ptr<LogicalOperator> plan);
