@@ -45,7 +45,8 @@ public:
 static void LoadInternal(DatabaseInstance &instance) {
 	// Register the SIP optimizer rule
 	OptimizerExtension optimizer;
-	optimizer.optimize_function = SIPOptimizerRule;
+	optimizer.optimize_function = PredicateTransferOptimizer::Optimize;
+	optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
 	instance.config.optimizer_extensions.push_back(optimizer);
 	
 	// Register logical operators
