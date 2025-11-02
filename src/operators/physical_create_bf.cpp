@@ -49,46 +49,21 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
 
     if (chunk.size() > 0) {
         lock_guard<mutex> bf_guard(gstate.bf_lock);
-        
+
         // process each filter plan
         for (size_t i = 0; i < filter_plans.size() && i < gstate.bloom_filters.size(); i++) {
             auto &plan = filter_plans[i];
             auto &bf = gstate.bloom_filters[i];
-            
-            if (plan && bf && !plan->build.empty()) {
-                // evaluate build expressions
-                ExpressionExecutor executor(context.client);
-                DataChunk build_chunk;
-                vector<LogicalType> build_types;
-                
-                // get types for build expressions
-                for (auto &expr : plan->build) {
-                    build_types.push_back(expr->return_type);
-                }
-                
-                build_chunk.Initialize(Allocator::DefaultAllocator(), build_types);
-                
-                // ixecute build expressions
-                for (size_t j = 0; j < plan->build.size(); j++) {
-                    executor.AddExpression(*plan->build[j]);
-                }
-                executor.Execute(chunk, build_chunk);
-                
-                // insert into bloom filter using bound columns
-                if (!plan->bound_cols_build.empty()) {
-                    bf->Insert(build_chunk, plan->bound_cols_build);
-                } else {
-                    // use all columns if no specific binding
-                    vector<idx_t> all_cols;
-                    for (idx_t k = 0; k < build_chunk.ColumnCount(); k++) {
-                        all_cols.push_back(k);
-                    }
-                    bf->Insert(build_chunk, all_cols);
-                }
+
+            if (plan && bf && !plan->bound_cols_build.empty()) {
+                // simplified version: use bound column indices directly from input chunk
+                // note: this assumes the chunk already contains the correct columns
+                bf->Insert(chunk, plan->bound_cols_build);
+                printf("  inserted %zu rows into bloom filter %zu\n", chunk.size(), i);
             }
         }
     }
-    
+
     return SinkResultType::NEED_MORE_INPUT;
 }
 

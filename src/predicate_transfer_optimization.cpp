@@ -1,76 +1,6 @@
-
-/*
-#include "duckdb.hpp"
-#include "duckdb/planner/operator/logical_comparison_join.hpp"
-#include "duckdb/optimizer/optimizer_extension.hpp"
-
-#include "duckdb/planner/expression/bound_columnref_expression.hpp"
-#include "include/dag.hpp"
-#include "operators/logical_create_bf.hpp"
-#include "operators/logical_use_bf.hpp"
-
-namespace duckdb {
-
-static shared_ptr<FilterPlan> MakeSIPFilterPlan(Expression &build_expr, Expression &probe_expr) {
-    auto plan = make_shared_ptr<FilterPlan>();
-    plan->build.push_back(build_expr.Copy());
-    plan->apply.push_back(probe_expr.Copy());
-    
-    // Extract bound column indices from the expressions
-    if (build_expr.type == ExpressionType::BOUND_COLUMN_REF) {
-        auto &build_col_ref = build_expr.Cast<BoundColumnRefExpression>();
-        plan->bound_cols_build.push_back(build_col_ref.binding.column_index);
-    }
-    
-    if (probe_expr.type == ExpressionType::BOUND_COLUMN_REF) {
-        auto &probe_col_ref = probe_expr.Cast<BoundColumnRefExpression>();
-        plan->bound_cols_apply.push_back(probe_col_ref.binding.column_index);
-    }
-    
-    return plan;
-}
-
-void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &op) {
-	for (auto &child : op->children) {
-		SIPOptimizerRule(input, child);
-	}
-	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
-		auto &join = op->Cast<LogicalComparisonJoin>();
-		// For each equality join condition
-		for (auto &cond : join.conditions) {
-			if (cond.comparison == ExpressionType::COMPARE_EQUAL &&
-				cond.left->type == ExpressionType::BOUND_COLUMN_REF &&
-				cond.right->type == ExpressionType::BOUND_COLUMN_REF) {
-				// Build side = left, probe side = right
-				auto bf_plan = MakeSIPFilterPlan(*cond.left, *cond.right);
-
-				// Insert LogicalCreateBF on build side (left child)
-				auto create_bf = make_uniq<LogicalCreateBF>(
-					vector<shared_ptr<FilterPlan>>{bf_plan});
-				create_bf->AddChild(std::move(join.children[0]));
-				
-				// Insert LogicalUseBF on probe side (right child)
-				auto use_bf = make_uniq<LogicalUseBF>(bf_plan);
-				use_bf->AddChild(std::move(join.children[1]));
-				
-				// Establish relationship between create and use operators
-				use_bf->related_create_bf = create_bf.get();
-				
-				join.children[0] = std::move(create_bf);
-				join.children[1] = std::move(use_bf);
-
-				break;
-				}
-		}
-	}
-}
-
-} // namespace duckdb
-*/
-
 #include "predicate_transfer_optimization.hpp"
-#include "operators/logical_use_bf.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+#include "operators/logical_use_bf.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/main/prepared_statement_data.hpp"
@@ -83,12 +13,12 @@ void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator
 
 namespace duckdb {
 
-unique_ptr<LogicalOperator> PredicateTransferOptimizer::PreOptimize(unique_ptr<LogicalOperator> &plan) {
+unique_ptr<LogicalOperator> PredicateTransferOptimizer::PreOptimize(unique_ptr<LogicalOperator> plan) {
 	graph_manager.Build(*plan);
-	return std::move(plan);
+	return plan;
 }
 
-unique_ptr<LogicalOperator> PredicateTransferOptimizer::Optimize(unique_ptr<LogicalOperator> &plan) {
+unique_ptr<LogicalOperator> PredicateTransferOptimizer::Optimize(unique_ptr<LogicalOperator> plan) {
 	auto &ordered_nodes = graph_manager.transfer_order;
 
 	// **Forward pass**: Process nodes in reverse order (from last to first)
@@ -103,16 +33,6 @@ unique_ptr<LogicalOperator> PredicateTransferOptimizer::Optimize(unique_ptr<Logi
 
 	// **Backward pass**: Process nodes in original order (from first to last)
 	// - Similar to the forward pass, but for backward edges
-	if (!ordered_nodes.empty() && ordered_nodes.front()->type == LogicalOperatorType::LOGICAL_GET) {
-		auto &root = ordered_nodes.front()->Cast<LogicalGet>();
-		if (root.table_filters.filters.empty()) {
-			// The largest table has no filter, so it should not transfer any BF for other tables.
-			idx_t node_id = TableOperatorManager::GetScalarTableIndex(&root);
-			auto &node = graph_manager.transfer_graph[node_id];
-			node->backward_stage_edges.out.clear();
-		}
-	}
-
 	for (auto *current_node : ordered_nodes) {
 		for (auto &BF_plan : CreateBloomFilterPlan(*current_node, true)) {
 			graph_manager.AddFilterPlan(BF_plan.first, BF_plan.second, true);
@@ -262,23 +182,23 @@ void PredicateTransferOptimizer::GetAllBFsToCreate(idx_t cur_node_id,
 		auto bf_plan = make_shared_ptr<FilterPlan>();
 
 		// Each expression leads to a bloom filter on a column on this table
-		for (auto &expr : edge->conditions) {
-			vector<BoundColumnRefExpression *> expressions;
-			GetColumnBindingExpression(*expr, expressions);
-			D_ASSERT(expressions.size() == 2);
+		idx_t size = edge->left.size();
+		for (idx_t i = 0; i < size; ++i) {
+			auto &left_binding = edge->left[i];
+			auto &right_binding = edge->right[i];
+			auto &return_type = edge->return_types[i];
 
-			auto binding0 = graph_manager.table_operator_manager.GetRenaming(expressions[0]->binding);
-			auto binding1 = graph_manager.table_operator_manager.GetRenaming(expressions[1]->binding);
+			bf_plan->return_types.push_back(return_type);
 
-			expressions[0]->binding = binding0;
-			expressions[1]->binding = binding1;
+			auto binding0 = graph_manager.table_operator_manager.GetRenaming(left_binding);
+			auto binding1 = graph_manager.table_operator_manager.GetRenaming(right_binding);
 
 			if (binding0.table_index == cur_node_id) {
-				bf_plan->build.push_back(expressions[0]->Copy());
-				bf_plan->apply.push_back(expressions[1]->Copy());
+				bf_plan->build.push_back(binding0);
+				bf_plan->apply.push_back(binding1);
 			} else if (binding1.table_index == cur_node_id) {
-				bf_plan->build.push_back(expressions[1]->Copy());
-				bf_plan->apply.push_back(expressions[0]->Copy());
+				bf_plan->build.push_back(binding1);
+				bf_plan->apply.push_back(binding0);
 			}
 		}
 		if (!bf_plan->build.empty()) {
@@ -346,7 +266,7 @@ void PredicateTransferOptimizer::PreOptimize(OptimizerExtensionInput &input, uni
 	auto optimizer_state = input.context.registered_state->GetOrCreate<PredicateTransferOptimizer>(
 		"rpt_optimizer_state", input.context);
 
-	plan = optimizer_state->PreOptimize(plan);
+	plan = optimizer_state->PreOptimize(std::move(plan));
 }
 
 void PredicateTransferOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
@@ -357,7 +277,7 @@ void PredicateTransferOptimizer::Optimize(OptimizerExtensionInput &input, unique
 			"rpt_optimizer_state", input.context);
 	}
 
-	plan = optimizer_state->Optimize(plan);
+	plan = optimizer_state->Optimize(std::move(plan));
 	
 	// cleanup
 	input.context.registered_state->Remove("rpt_optimizer_state");

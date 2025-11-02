@@ -14,8 +14,9 @@
 namespace duckdb {
 
 struct FilterPlan {
-	vector<unique_ptr<Expression>> build;
-	vector<unique_ptr<Expression>> apply;
+	vector<ColumnBinding> build;
+	vector<ColumnBinding> apply;
+	vector<LogicalType> return_types;
 
 	vector<idx_t> bound_cols_build;
 	vector<idx_t> bound_cols_apply;
@@ -33,7 +34,10 @@ public:
 
 	idx_t destination;
 
-	vector<Expression *> conditions;
+	// The left is the smaller table side, while the right is the bigger table side
+	vector<ColumnBinding> left;
+	vector<ColumnBinding> right;
+	vector<LogicalType> return_types;
 	vector<shared_ptr<FilterPlan>> filter_plan;
 };
 
@@ -44,11 +48,11 @@ struct Edges {
 
 class GraphNode {
 public:
-	GraphNode(idx_t id, int32_t priority) : id(id), priority(priority) {
+	GraphNode(idx_t id, int32_t priority) : id(id), cardinality_order(priority) {
 	}
 
 	idx_t id;
-	int32_t priority;
+	int32_t cardinality_order;
 
 	//! Predicate Transfer has two stages. The transfer graph is different because of the existence of LEFT JOIN, RIGHT
 	//! JOIN, etc.
@@ -57,7 +61,8 @@ public:
 
 public:
 	GraphEdge *Add(idx_t other, bool is_forward, bool is_in_edge);
-	GraphEdge *Add(idx_t other, Expression *expression, bool is_forward, bool is_in_edge);
+	GraphEdge *Add(idx_t other, const vector<ColumnBinding> &left_cols, const vector<ColumnBinding> &right_cols,
+	               const vector<LogicalType> &types, bool is_forward, bool is_in_edge);
 	GraphEdge *Add(idx_t other, const shared_ptr<FilterPlan> &filter_plan, bool is_forward, bool is_in_edge);
 };
 

@@ -47,25 +47,10 @@ bool PhysicalUseBF::FilterDataChunk(DataChunk &chunk, const vector<shared_ptr<Bl
     	return true;
     }
     
-    // evaluate apply expressions on the chunk
-    ExpressionExecutor executor(context.client);
-    DataChunk apply_chunk;
-    vector<LogicalType> apply_types;
+    // simplified version: use bound column indices directly from input chunk
+    // note: this assumes the chunk already contains the correct columns
     
-    // get types for apply expressions
-    for (auto &expr : filter_plan->apply) {
-        apply_types.push_back(expr->return_type);
-    }
-    
-    apply_chunk.Initialize(Allocator::DefaultAllocator(), apply_types);
-    
-    // execute apply expressions
-    for (size_t i = 0; i < filter_plan->apply.size(); i++) {
-        executor.AddExpression(*filter_plan->apply[i]);
-    }
-    executor.Execute(chunk, apply_chunk);
-    
-    // use bloom filters to filter rows
+    // use bloom filters to filter rows using bound columns
     bool any_rows_remain = false;
     SelectionVector sel(chunk.size());
     idx_t result_count = 0;
@@ -78,13 +63,13 @@ bool PhysicalUseBF::FilterDataChunk(DataChunk &chunk, const vector<shared_ptr<Bl
             if (bf && bf->finalized_) {
                 vector<uint32_t> results(1);
                 
-                // create single-row chunk for lookup
+                // create single-row chunk for lookup using input chunk columns
                 DataChunk single_row_chunk;
-                single_row_chunk.Initialize(Allocator::DefaultAllocator(), apply_types);
+                single_row_chunk.Initialize(Allocator::DefaultAllocator(), chunk.GetTypes());
                 
                 // copy row data
-                for (idx_t col = 0; col < apply_chunk.ColumnCount(); col++) {
-                    single_row_chunk.data[col].Slice(apply_chunk.data[col], i, i + 1);
+                for (idx_t col = 0; col < chunk.ColumnCount(); col++) {
+                    single_row_chunk.data[col].Slice(chunk.data[col], i, i + 1);
                 }
                 single_row_chunk.SetCardinality(1);
                 

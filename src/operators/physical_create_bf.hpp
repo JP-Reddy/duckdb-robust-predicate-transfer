@@ -14,7 +14,7 @@ public:
 class PhysicalCreateBFGlobalSinkState : public GlobalSinkState {
 public:
 	PhysicalCreateBFGlobalSinkState() = default;
-	
+
 	vector<shared_ptr<BloomFilter>> bloom_filters;
 	mutex bf_lock;
 };
@@ -24,7 +24,7 @@ public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 public:
-	PhysicalCreateBF(const vector<shared_ptr<FilterPlan>> &filter_plans, vector<LogicalType> types, 
+	PhysicalCreateBF(const vector<shared_ptr<FilterPlan>> &filter_plans, vector<LogicalType> types,
 	                 idx_t estimated_cardinality);
 
 	// Required virtual methods
@@ -32,7 +32,7 @@ public:
 
 	string GetName() const override;
 	string ToString(ExplainFormat format = ExplainFormat::DEFAULT) const override;
-	
+
 	// sink interface - PhysicalOperator can act as sink
 	unique_ptr<GlobalSinkState> GetGlobalSinkState(ClientContext &context) const override;
 	unique_ptr<LocalSinkState> GetLocalSinkState(ExecutionContext &context) const override;
@@ -47,7 +47,7 @@ public:
 public:
 	vector<shared_ptr<FilterPlan>> filter_plans;
 	bool is_probing_side;
-	
+
 	// access to created bloom filters for PhysicalUseBF operators
 	vector<shared_ptr<BloomFilter>> GetBloomFilters() const;
 };

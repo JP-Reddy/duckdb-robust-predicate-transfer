@@ -1,17 +1,3 @@
-// #pragma once
-//
-// #include "duckdb/optimizer/optimizer_extension.hpp"
-// #include "duckdb/planner/logical_operator.hpp"
-//
-// namespace duckdb {
-//
-//
-// void SIPOptimizerRule(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &op);
-//
-//
-//
-// } // namespace duckdb
-
 #pragma once
 
 #include "transfer_graph_manager.hpp"
@@ -30,11 +16,11 @@ public:
 
 	//! Extract the query join information, note that this function must be called before join order optimization,
 	//! because some join conditions are lost during join order optimization.
-	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> &plan);
+	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 
 	//! Create bloom filters and insert them into the query plan, note that this function must be called after join
 	//! order optimization, because it cannot handle newly inserted operator correctly.
-	unique_ptr<LogicalOperator> Optimize(unique_ptr<LogicalOperator> &plan);
+	unique_ptr<LogicalOperator> Optimize(unique_ptr<LogicalOperator> plan);
 
 	//! Static functions for extension framework integration
 	static void PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan);
