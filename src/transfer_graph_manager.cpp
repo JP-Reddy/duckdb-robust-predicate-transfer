@@ -343,6 +343,9 @@ void TransferGraphManager::CreatePredicateTransferGraph() {
 	}
 	table_operator_manager.table_operators = saved_nodes;
 
+	printf("=== CREATING PREDICATE TRANSFER GRAPH ===\n");
+	printf("Number of selected edges: %zu\n", selected_edges.size());
+
 	for (auto &edge : selected_edges) {
 		if (!edge) {
 			continue;
@@ -358,18 +361,55 @@ void TransferGraphManager::CreatePredicateTransferGraph() {
 		bool swap_order = (left_node->priority > right_node->priority);
 		auto *condition = edge->condition.get();
 
+		printf("\nProcessing edge: left_table_idx=%llu (priority=%d) -> right_table_idx=%llu (priority=%d)\n",
+		       (unsigned long long)left_idx, right_node->priority, (unsigned long long)right_idx, left_node->priority);
+		printf("  swap_order=%s, protect_left=%s, protect_right=%s\n", 
+		       swap_order ? "true" : "false", 
+		       edge->protect_left ? "true" : "false",
+		       edge->protect_right ? "true" : "false");
+
 		// forward: from the smaller to the larger
 		if (!edge->protect_left) {
+			printf("  FORWARD PASS: Adding edge %llu -> %llu (stage=%s)\n", 
+			       (unsigned long long)right_node->id, (unsigned long long)left_node->id, !swap_order ? "forward" : "backward");
 			left_node->Add(right_node->id, condition, !swap_order, false);
 			right_node->Add(left_node->id, condition, !swap_order, true);
 		}
 
 		// backward: from the larger to the smaller
 		if (!edge->protect_right) {
+			printf("  BACKWARD PASS: Adding edge %llu -> %llu (stage=%s)\n", 
+			       (unsigned long long)right_node->id, (unsigned long long)left_node->id, swap_order ? "backward" : "forward");
 			left_node->Add(right_node->id, condition, swap_order, true);
 			right_node->Add(left_node->id, condition, swap_order, false);
 		}
 	}
+
+	printf("\n=== FINAL TRANSFER GRAPH ===\n");
+	for (size_t i = 0; i < transfer_graph.size(); i++) {
+		if (transfer_graph[i]) {
+			auto &node = *transfer_graph[i];
+			printf("Node %llu (priority=%d):\n", (unsigned long long)node.id, node.priority);
+			printf("  Forward out edges: ");
+			for (auto &edge : node.forward_stage_edges.out) {
+				printf("%llu ", (unsigned long long)edge->destination);
+			}
+			printf("\n  Forward in edges: ");
+			for (auto &edge : node.forward_stage_edges.in) {
+				printf("%llu ", (unsigned long long)edge->destination);
+			}
+			printf("\n  Backward out edges: ");
+			for (auto &edge : node.backward_stage_edges.out) {
+				printf("%llu ", (unsigned long long)edge->destination);
+			}
+			printf("\n  Backward in edges: ");
+			for (auto &edge : node.backward_stage_edges.in) {
+				printf("%llu ", (unsigned long long)edge->destination);
+			}
+			printf("\n");
+		}
+	}
+	printf("=== END TRANSFER GRAPH ===\n\n");
 }
 
 pair<idx_t, idx_t> TransferGraphManager::FindEdge(const unordered_set<idx_t> &constructed_set,
