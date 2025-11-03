@@ -89,11 +89,11 @@ bool TransferGraphManager::Build(LogicalOperator &plan) {
 		}
 	}
 
-	// 3. Unfiltered Table only receives Bloom filters, they will not generate Bloom filters.
-	// SkipUnfilteredTable(joins);  // TEMPORARY: commenting out to test if this fixes edge protection
+	// 3. unfiltered table only receives bloom filters, they will not generate bloom filters.
+	// SkipUnfilteredTable(joins);
 	printf("3. after SkipUnfilteredTable: neighbor_matrix size=%zu\n", neighbor_matrix.size());
 
-	// 4. Create the transfer graph
+	// 4. create the transfer graph
 	printf("4. calling CreateTransferPlanUpdated()\n");
 	CreateTransferPlanUpdated();
 
@@ -320,10 +320,11 @@ void TransferGraphManager::ClassifyTables() {
 			continue;
 		}
 
-		// Check unfiltered table
+		// Check unfiltered table  
 		if (table->type == LogicalOperatorType::LOGICAL_GET) {
 			auto &get = table->Cast<LogicalGet>();
 			if (get.table_filters.filters.empty()) {
+				std::cout << "table_" << id << " has no table filters\n";
 				printf("  table_%zu marked as UNFILTERED (no table filters)\n", id);
 				unfiltered_table.insert(id);
 				continue;
@@ -332,7 +333,8 @@ void TransferGraphManager::ClassifyTables() {
 			}
 		}
 
-		// Last, it is a filtered table
+		std::cout<< "Adding table_" << id << " to filtered table\n";
+		// last, it is a filtered table
 		filtered_table.insert(id);
 	}
 }
@@ -525,21 +527,36 @@ void TransferGraphManager::LargestRootUpdated(vector<LogicalOperator *> &sorted_
 	int prior_flag = static_cast<int>(table_operator_manager.table_operators.size()) - 1;
 	idx_t root = std::numeric_limits<idx_t>::max();
 
-	// Try to choose the largest filtered or intermediate table as the root
+	printf("Sorted nodes order - descending order: \n");
 	for (auto it = sorted_nodes.rbegin(); it != sorted_nodes.rend(); ++it) {
 		auto &node = *it;
-		auto id = table_operator_manager.GetScalarTableIndex(node);
-		if (filtered_table.count(id) || intermediate_table.count(id)) {
-			root = id;
-			break;
-		}
+		idx_t table_idx = table_operator_manager.GetScalarTableIndex(node);
+		std::cout << table_idx << " " ;
 	}
+
+	root = table_operator_manager.GetScalarTableIndex(sorted_nodes.back());
+	std::cout << "\nRoot = " << root << std::endl;
+
+	// Try to choose the largest filtered or intermediate table as the root
+	// for (auto it = sorted_nodes.rbegin(); it != sorted_nodes.rend(); ++it) {
+	// 	auto &node = *it;
+	// 	auto id = table_operator_manager.GetScalarTableIndex(node);
+	// 	if (filtered_table.count(id) || intermediate_table.count(id)) {
+	// 		std::cout << "\nRoot = " << id << std::endl;
+	// 		root = id;
+	// 		break;
+	// 	}
+	// }
 
 	// If we cannot find it, use the largest table as the root
 	if (root == std::numeric_limits<idx_t>::max()) {
 		auto &node = sorted_nodes.back();
 		root = table_operator_manager.GetScalarTableIndex(node);
 	}
+
+	printf("LargestRootUpdated: selected root = table_%zu\n", root);
+	printf("filtered_table.size()=%zu, intermediate_table.size()=%zu\n", 
+	       filtered_table.size(), intermediate_table.size());
 
 	// Initialize nodes
 	for (auto &entry : table_operator_manager.table_operators) {
@@ -570,6 +587,9 @@ void TransferGraphManager::LargestRootUpdated(vector<LogicalOperator *> &sorted_
 		if (selected_edge.first == std::numeric_limits<idx_t>::max()) {
 			break;
 		}
+
+		printf("  spanning tree edge: table_%zu <-> table_%zu\n", 
+		       selected_edge.first, selected_edge.second);
 
 		auto &edge = neighbor_matrix[selected_edge.first][selected_edge.second];
 		selected_edges.emplace_back(std::move(edge));

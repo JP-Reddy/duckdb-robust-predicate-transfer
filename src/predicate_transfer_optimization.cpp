@@ -14,11 +14,19 @@
 namespace duckdb {
 
 unique_ptr<LogicalOperator> PredicateTransferOptimizer::PreOptimize(unique_ptr<LogicalOperator> plan) {
+	// preoptimize does nothing - transfer graph building moved to optimize phase
+	// to ensure table filters are populated after duckdb's filter pushdown
 	graph_manager.Build(*plan);
 	return plan;
 }
 
 unique_ptr<LogicalOperator> PredicateTransferOptimizer::Optimize(unique_ptr<LogicalOperator> plan) {
+	// build transfer graph after filter pushdown has occurred
+	// if (!graph_manager.Build(*plan)) {
+	// 	// if build fails (< 2 tables or other issues), return plan unchanged
+	// 	return plan;
+	// }
+	
 	auto &ordered_nodes = graph_manager.transfer_order;
 
 	// **Forward pass**: Process nodes in reverse order (from last to first)
