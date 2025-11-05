@@ -4,17 +4,22 @@
 #include "duckdb/main/client_context_state.hpp"
 
 namespace duckdb {
+typedef idx_t table_id;
 
 class RPTOptimizerContextState : public ClientContextState {
 public:
 	explicit RPTOptimizerContextState(ClientContext &context) {}
 
 	vector<JoinEdge> join_edges;
-	map<idx_t, idx_t> table_cardinalities;
+//	map<table_id, idx_t> table_cardinalities;
 	map<LogicalOperator *, idx_t> operator_to_table_id;
 
+	TableManager table_mgr;
+	vector<LogicalOperator*> join_ops;
+
+public:
 	// extract all the join edges from the plan
-	static vector<JoinEdge> ExtractJoins(LogicalOperator &plan);
+	vector<JoinEdge> ExtractOperators(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
 
 
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);

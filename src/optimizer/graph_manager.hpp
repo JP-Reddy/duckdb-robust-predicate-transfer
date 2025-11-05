@@ -6,7 +6,7 @@
 
 
 namespace duckdb {
-
+typdef idx_t table_id;
 	class JoinEdge {
 		private:
 			idx_t table1;
@@ -19,6 +19,11 @@ namespace duckdb {
 			// reference<LogicalOperator> table2_op;
 	};
 
+	struct TableInfo {
+		table_id id;
+		LogicalOperator* table_op;  // LogicalGet, LogicalFilter->LogicalGet, etc.
+		idx_t cardinality;
+	}
 	class BloomFilterOperation {
 		bool is_create; // true = CREATE_BF, false = USE_BF
 		idx_t build_table;
