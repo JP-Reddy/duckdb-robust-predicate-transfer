@@ -270,7 +270,7 @@ void PredicateTransferOptimizer::GetColumnBindingExpression(Expression &expr,
 }
 
 void PredicateTransferOptimizer::PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
-	// create or get existing optimizer state using proper DuckDB state management
+	// create optimizer state using proper DuckDB state management
 	auto optimizer_state = input.context.registered_state->GetOrCreate<PredicateTransferOptimizer>(
 		"rpt_optimizer_state", input.context);
 

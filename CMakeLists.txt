@@ -29,6 +29,8 @@ set(EXTENSION_SOURCES
     src/predicate_transfer_optimization.cpp
     src/table_operator_manager.cpp
     src/transfer_graph_manager.cpp
+    src/optimizer/rpt_optimizer.cpp
+    src/optimizer/graph_manager.cpp
 #    src/bottom_up_rpt_optimizer.cpp
 #    src/robust_predicate_transfer_optimizer.cpp
 )
