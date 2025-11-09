@@ -26,6 +26,7 @@ public:
 	vector<JoinEdge> ExtractOperators(LogicalOperator &plan);
 	void ExtractOperatorsRecursive(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
 	vector<JoinEdge> CreateJoinEdges(vector<LogicalOperator*> &join_ops);
+	vector<BloomFilterOperation> LargestRoot(vector<JoinEdge> &edges);
 
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 

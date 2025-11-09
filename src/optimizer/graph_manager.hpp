@@ -10,7 +10,7 @@
 namespace duckdb {
 typedef idx_t table_id;
 	class JoinEdge {
-	private:
+	public:
 		idx_t table_a;
 		idx_t table_b;
 		vector<ColumnBinding> join_columns_a;  // multi-column join support
@@ -35,9 +35,12 @@ typedef idx_t table_id;
 	class BloomFilterOperation {
 	public:
 		bool is_create; // true = CREATE_BF, false = USE_BF
-		idx_t build_table;
-		idx_t probe_table;
+		idx_t build_table_idx;
+		idx_t probe_table_idx;
 		vector<ColumnBinding> join_columns;
+		vector<ColumnBinding> build_columns;
+		vector<ColumnBinding> probe_columns;
+		JoinType join_type;
 	};
 
 } // namespace duckdb

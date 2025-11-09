@@ -11,6 +11,8 @@
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/unordered_map.hpp"
 
+#include <fmt/format.h>
+
 namespace duckdb {
 
 vector<JoinEdge> RPTOptimizerContextState::ExtractOperators(LogicalOperator &plan) {
@@ -31,7 +33,6 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 //		return cond.left->Hash() + cond.right->Hash();
 //	};
 
-	vector<JoinEdge> join_edges;
 	LogicalOperator *op = &plan;
 
 	// step 1: collect all join edges
@@ -113,6 +114,7 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 		}
 		case LogicalOperatorType::LOGICAL_DUMMY_SCAN:
 		case LogicalOperatorType::LOGICAL_EXPRESSION_GET:
+		case LogicalOperatorType::LOGICAL_DELIM_GET:
 		case LogicalOperatorType::LOGICAL_GET:
 		case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
 		case LogicalOperatorType::LOGICAL_CHUNK_GET:
@@ -137,12 +139,6 @@ vector<JoinEdge> RPTOptimizerContextState::CreateJoinEdges(vector<LogicalOperato
 	for (auto &op : join_ops) {
 		auto &join = op->Cast<LogicalComparisonJoin>();
 
-		// skip duplicate conditions
-		//hash_t hash = ComputeConditionHash(join.conditions[0]);
-		//if (!existed_set.insert(hash).second) {
-		//	continue;
-		//}
-
 		vector<ColumnBinding> left_columns, right_columns;
 		for(const JoinCondition &cond: join.conditions) {
 			if(cond.comparison == ExpressionType::COMPARE_EQUAL &&
@@ -153,18 +149,101 @@ vector<JoinEdge> RPTOptimizerContextState::CreateJoinEdges(vector<LogicalOperato
 			}
 		}
 
-		// map the table to the join edge
-		TableInfo* left_table = table_mgr.GetTableInfo(op->children[0].get());
-		TableInfo* right_table = table_mgr.GetTableInfo(op->children[1].get());
-
-		// TODO: should we check the right_columns too? is it necessary?
 		if(!left_columns.empty() && !right_columns.empty()) {
-			JoinEdge edge(left_table->table_idx, right_table->table_idx, left_columns, right_columns, left_columns.size(), join.join_type);
-			edges.push_back(edge);
+			// use column bindings to determine table indices instead of looking up join children directly
+			idx_t left_table_idx = left_columns[0].table_index;
+			idx_t right_table_idx = right_columns[0].table_index;
+			
+			// verify these table indices exist in our table manager
+			if(table_mgr.table_lookup.find(left_table_idx) != table_mgr.table_lookup.end() &&
+			   table_mgr.table_lookup.find(right_table_idx) != table_mgr.table_lookup.end()) {
+				JoinEdge edge(left_table_idx, right_table_idx, left_columns, right_columns, left_columns.size(), join.join_type);
+				edges.push_back(edge);
+			}
 		}
 	}
 
 	return edges;
+}
+
+vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) {
+	// step 1: find largest table by cardinality
+	idx_t largest_table_idx = 0;
+	idx_t max_cardinality = 0;
+	for (auto &table_info : table_mgr.table_ops) {
+		if (table_info.estimated_cardinality > max_cardinality) {
+			max_cardinality = table_info.estimated_cardinality;
+			largest_table_idx = table_info.table_idx;
+		}
+	}
+
+	// step 2: build MST (maximum) using Prim's algorithm starting from largest table
+	unordered_set<idx_t> mst_nodes;
+	vector<JoinEdge> mst_edges;
+
+	mst_nodes.insert(largest_table_idx);
+
+	while (mst_nodes.size() < table_mgr.table_ops.size() && !edges.empty()) {
+		JoinEdge *best_edge = nullptr;
+		idx_t max_weight = 0;
+		idx_t max_cardinality = 0;
+		for (JoinEdge &edge : edges) {
+			bool left_in_mst = mst_nodes.count(edge.table_a) > 0;
+			bool right_in_mst = mst_nodes.count(edge.table_b) > 0;
+
+			if (left_in_mst != right_in_mst) {
+				idx_t weight = edge.weight;
+				idx_t left_cardinality = table_mgr.table_lookup[edge.table_a].estimated_cardinality;
+				idx_t right_cardinality = table_mgr.table_lookup[edge.table_b].estimated_cardinality;
+				idx_t cardinality = std::min(left_cardinality, right_cardinality);
+
+				if (weight > max_weight || (weight == max_weight && cardinality > max_cardinality)) {
+					max_weight = weight;
+					max_cardinality = cardinality;
+					best_edge = &edge;
+				}
+			}
+		}
+
+		if (!best_edge) {
+			break;
+		}
+
+		mst_edges.push_back(*best_edge);
+		mst_nodes.insert(best_edge->table_a);
+		mst_nodes.insert(best_edge->table_b);
+	}
+
+	// step 3: Convert MST edges to BloomFilterOperations
+	vector<BloomFilterOperation> bf_operations;
+
+	for (const JoinEdge &mst_edge: mst_edges) {
+		// for each edge, create a bf operation
+		// rule: CREATE_BF on smaller table, USE_BF on larger table
+
+		const idx_t left_cardinality = table_mgr.table_lookup[mst_edge.table_a].estimated_cardinality;
+		const idx_t right_cardinality = table_mgr.table_lookup[mst_edge.table_b].estimated_cardinality;
+
+		BloomFilterOperation bf_op;
+
+		if (left_cardinality <= right_cardinality) {
+			bf_op.build_table_idx = mst_edge.table_a;
+			bf_op.probe_table_idx = mst_edge.table_b;
+			bf_op.build_columns = mst_edge.join_columns_a;
+			bf_op.probe_columns = mst_edge.join_columns_b;
+		}
+		else {
+			bf_op.build_table_idx = mst_edge.table_b;
+			bf_op.probe_table_idx = mst_edge.table_a;
+			bf_op.build_columns = mst_edge.join_columns_b;
+			bf_op.probe_columns = mst_edge.join_columns_a;
+		}
+		bf_op.join_type = mst_edge.join_type;
+
+		bf_operations.push_back(bf_op);
+	}
+
+	return bf_operations;
 }
 
 } // namespace duckdb
