@@ -1,10 +1,12 @@
 #pragma once
 
 #include "graph_manager.hpp"
+#include "table_manager.hpp"
 #include "duckdb/main/client_context_state.hpp"
+#include "duckdb/common/vector.hpp"
+#include "duckdb/common/unordered_map.hpp"
 
 namespace duckdb {
-typedef idx_t table_id;
 
 class RPTOptimizerContextState : public ClientContextState {
 public:
@@ -17,10 +19,13 @@ public:
 	TableManager table_mgr;
 	vector<LogicalOperator*> join_ops;
 
+	unordered_map<ColumnBinding, ColumnBinding, ColumnBindingHashFunction> rename_col_bindings;
 public:
 	// extract all the join edges from the plan
-	vector<JoinEdge> ExtractOperators(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
-
+	//vector<JoinEdge> ExtractOperators(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
+	vector<JoinEdge> ExtractOperators(LogicalOperator &plan);
+	void ExtractOperatorsRecursive(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
+	vector<JoinEdge> CreateJoinEdges(vector<LogicalOperator*> &join_ops);
 
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 
@@ -31,6 +36,6 @@ public:
 	static void Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan);
 };
 
-}
+} // namespace duckdb
 
 

@@ -2,6 +2,11 @@
 
 namespace duckdb {
 
+void TableManager::AddTable(const TableInfo &table) {
+	table_lookup[table.table_idx] = table;
+	table_ops.push_back(table);
+}
+
 idx_t TableManager::GetScalarTableIndex(LogicalOperator *op) {
 	switch (op->type) {
 	case LogicalOperatorType::LOGICAL_WINDOW:
@@ -30,10 +35,24 @@ void TableManager::AddTableOperator(LogicalOperator *op) {
 	TableInfo tbl_info;
 	tbl_info.estimated_cardinality = op->estimated_cardinality;
 	tbl_info.table_idx = GetScalarTableIndex(op);
+	table_id table_idx = tbl_info.table_idx;
 	tbl_info.table_op = op;
 	if (table_idx != std::numeric_limits<idx_t>::max() && table_lookup.find(table_idx) == table_lookup.end()) {
 		table_lookup[table_idx] = tbl_info;
+		table_ops.push_back(tbl_info);
 	}
 }
 
+TableInfo *TableManager::GetTableInfo(LogicalOperator *op) {
+	if (!op) {
+		return nullptr;
+	}
+
+	idx_t table_idx = GetScalarTableIndex(op);
+	if(table_lookup.find(table_idx) == table_lookup.end()) {
+		return nullptr;
+	}
+	return &table_lookup[table_idx];
 }
+
+} // namespace duckdb
