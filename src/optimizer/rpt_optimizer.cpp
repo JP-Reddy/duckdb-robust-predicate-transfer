@@ -184,18 +184,18 @@ vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEd
 	mst_nodes.insert(largest_table_idx);
 
 	while (mst_nodes.size() < table_mgr.table_ops.size() && !edges.empty()) {
-		JoinEdge *best_edge = nullptr;
+		const JoinEdge *best_edge = nullptr;
 		idx_t max_weight = 0;
-		idx_t max_cardinality = 0;
+		max_cardinality = 0;
 		for (JoinEdge &edge : edges) {
 			bool left_in_mst = mst_nodes.count(edge.table_a) > 0;
 			bool right_in_mst = mst_nodes.count(edge.table_b) > 0;
 
 			if (left_in_mst != right_in_mst) {
-				idx_t weight = edge.weight;
+				const idx_t weight = edge.weight;
 				idx_t left_cardinality = table_mgr.table_lookup[edge.table_a].estimated_cardinality;
 				idx_t right_cardinality = table_mgr.table_lookup[edge.table_b].estimated_cardinality;
-				idx_t cardinality = std::min(left_cardinality, right_cardinality);
+				const idx_t cardinality = std::min(left_cardinality, right_cardinality);
 
 				if (weight > max_weight || (weight == max_weight && cardinality > max_cardinality)) {
 					max_weight = weight;
@@ -206,6 +206,7 @@ vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEd
 		}
 
 		if (!best_edge) {
+			printf("Warning - Disconnected components found. MST incomplete.\n");
 			break;
 		}
 
@@ -219,7 +220,7 @@ vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEd
 
 	for (const JoinEdge &mst_edge: mst_edges) {
 		// for each edge, create a bf operation
-		// rule: CREATE_BF on smaller table, USE_BF on larger table
+		// rule: CREATE_BF on a smaller table, USE_BF on a larger table
 
 		const idx_t left_cardinality = table_mgr.table_lookup[mst_edge.table_a].estimated_cardinality;
 		const idx_t right_cardinality = table_mgr.table_lookup[mst_edge.table_b].estimated_cardinality;
