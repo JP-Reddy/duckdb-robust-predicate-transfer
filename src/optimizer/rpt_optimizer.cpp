@@ -177,6 +177,8 @@ vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEd
 		}
 	}
 
+	DebugPrintGraph(edges);
+
 	// step 2: build MST (maximum) using Prim's algorithm starting from largest table
 	unordered_set<idx_t> mst_nodes;
 	vector<JoinEdge> mst_edges;
@@ -244,7 +246,75 @@ vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEd
 		bf_operations.push_back(bf_op);
 	}
 
+	DebugPrintMST(mst_edges, bf_operations);
 	return bf_operations;
+}
+
+void RPTOptimizerContextState::DebugPrintGraph(const vector<JoinEdge> &edges) const {
+	// Debug: Print all tables
+	printf("=== TABLE INFORMATION ===\n");
+	for (const auto &table_info : table_mgr.table_ops) {
+		printf("Table %llu: cardinality=%llu\n", table_info.table_idx, table_info.estimated_cardinality);
+	}
+
+	// Find largest table
+	idx_t largest_table_idx = 0;
+	idx_t max_cardinality = 0;
+	for (auto &table_info : table_mgr.table_ops) {
+		if (table_info.estimated_cardinality > max_cardinality) {
+			max_cardinality = table_info.estimated_cardinality;
+			largest_table_idx = table_info.table_idx;
+		}
+	}
+	printf("Largest table: %llu (cardinality=%llu)\n\n", largest_table_idx, max_cardinality);
+
+	// Debug: Print all join edges
+	printf("=== ALL JOIN EDGES ===\n");
+	for (size_t i = 0; i < edges.size(); i++) {
+		const auto &edge = edges[i];
+		printf("Edge %zu: %llu <-> %llu (weight=%llu, type=%d)\n",
+				i, edge.table_a, edge.table_b, edge.weight, (int)edge.join_type);
+
+		// Print column bindings
+		printf("  Columns A: ");
+		for (const auto &col : edge.join_columns_a) {
+			printf("(%llu.%llu) ", col.table_index, col.column_index);
+		}
+		printf("\n  Columns B: ");
+		for (const auto &col : edge.join_columns_b) {
+			printf("(%llu.%llu) ", col.table_index, col.column_index);
+		}
+		printf("\n");
+	}
+	printf("\n");
+}
+
+void RPTOptimizerContextState::DebugPrintMST(const vector<JoinEdge> &mst_edges, const vector<BloomFilterOperation> &bf_operations) {
+	printf("=== MST EDGES ===\n");
+	for (size_t i = 0; i < mst_edges.size(); i++) {
+		const auto &edge = mst_edges[i];
+		printf("MST Edge %zu: %llu <-> %llu (weight=%llu)\n",
+			i, edge.table_a, edge.table_b, edge.weight);
+	}
+	printf("\n");
+
+	printf("=== BLOOM FILTER OPERATIONS ===\n");
+	for (size_t i = 0; i < bf_operations.size(); i++) {
+		const auto &bf_op = bf_operations[i];
+		printf("BF Op %zu: CREATE_BF on table %llu -> USE_BF on table %llu\n",
+			i, bf_op.build_table_idx, bf_op.probe_table_idx);
+
+		printf("  Build columns: ");
+		for (const auto &col : bf_op.build_columns) {
+			printf("(%llu.%llu) ", col.table_index, col.column_index);
+		}
+		printf("\n  Probe columns: ");
+		for (const auto &col : bf_op.probe_columns) {
+			printf("(%llu.%llu) ", col.table_index, col.column_index);
+		}
+		printf("\n");
+	}
+	printf("\n");
 }
 
 } // namespace duckdb

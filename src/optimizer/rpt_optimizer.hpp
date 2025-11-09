@@ -28,6 +28,10 @@ public:
 	vector<JoinEdge> CreateJoinEdges(vector<LogicalOperator*> &join_ops);
 	vector<BloomFilterOperation> LargestRoot(vector<JoinEdge> &edges);
 
+	// debug functions
+	void DebugPrintGraph(const vector<JoinEdge> &edges) const;
+	void DebugPrintMST(const vector<JoinEdge> &mst_edges, const vector<BloomFilterOperation> &bf_operations);
+
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 
 	unique_ptr<LogicalOperator> Optimize(unique_ptr<LogicalOperator> plan);
