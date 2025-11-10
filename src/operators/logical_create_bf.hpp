@@ -9,10 +9,9 @@
 
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/operator/logical_extension_operator.hpp"
-#include "dag.hpp"
+#include "../optimizer/graph_manager.hpp"
 
 namespace duckdb {
-struct FilterPlan;
 class DatabaseInstance;
 class PhysicalCreateBF;
 
@@ -23,10 +22,10 @@ public:
 
 public:
 	explicit LogicalCreateBF();
-	explicit LogicalCreateBF(vector<shared_ptr<FilterPlan>> filter_plans);
+	explicit LogicalCreateBF(const BloomFilterOperation &bf_op);
 
 	bool can_stop = false;
-	vector<shared_ptr<FilterPlan>> filter_plans;
+	BloomFilterOperation bf_operation;
 	PhysicalCreateBF *physical = nullptr;
 
 	vector<shared_ptr<DynamicTableFilterSet>> min_max_to_create;

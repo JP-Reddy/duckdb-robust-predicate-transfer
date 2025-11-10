@@ -9,11 +9,10 @@
 
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/operator/logical_extension_operator.hpp"
-#include "dag.hpp"
 #include "logical_create_bf.hpp"
+#include "../optimizer/graph_manager.hpp"
 
 namespace duckdb {
-struct FilterPlan;
 class DatabaseInstance;
 class PhysicalUseBF;
 
@@ -24,9 +23,9 @@ public:
 
 public:
 	explicit LogicalUseBF();
-	explicit LogicalUseBF(shared_ptr<FilterPlan> filter_plan);
+	explicit LogicalUseBF(const BloomFilterOperation &bf_op);
 
-	shared_ptr<FilterPlan> filter_plan;
+	BloomFilterOperation bf_operation;
 	LogicalCreateBF *related_create_bf = nullptr;
 
 	PhysicalUseBF *physical = nullptr;

@@ -59,7 +59,7 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
                 // simplified version: use bound column indices directly from input chunk
                 // note: this assumes the chunk already contains the correct columns
                 bf->Insert(chunk, plan->bound_cols_build);
-                printf("  inserted %zu rows into bloom filter %zu\n", chunk.size(), i);
+                printf("  inserted %llu rows into bloom filter %zu\n", chunk.size(), i);
             }
         }
     }

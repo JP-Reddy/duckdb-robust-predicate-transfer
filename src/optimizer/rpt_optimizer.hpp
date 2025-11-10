@@ -26,8 +26,27 @@ public:
 	vector<JoinEdge> ExtractOperators(LogicalOperator &plan);
 	void ExtractOperatorsRecursive(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
 	vector<JoinEdge> CreateJoinEdges(vector<LogicalOperator*> &join_ops);
-	vector<BloomFilterOperation> LargestRoot(vector<JoinEdge> &edges);
+	vector<JoinEdge> LargestRoot(vector<JoinEdge> &edges);
 
+	// void CreateForwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
+	// 														const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding> &larger_columns,
+	// 														unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &forward_pass);
+	//
+	// void CreateBackwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
+	// 														const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding> &larger_columns,
+	// 														unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &backward_pass);
+	//
+	std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
+			unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
+	GenerateStageModifications(const vector<JoinEdge> &mst_edges);
+
+	unique_ptr<LogicalOperator> BuildStackedBFOperators(LogicalOperator* table_op,
+							     const vector<BloomFilterOperation> &bf_ops,
+							     bool reverse_order = false);
+
+	unique_ptr<LogicalOperator> ApplyStageModifications(unique_ptr<LogicalOperator> plan,
+							   const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &forward_bf_ops,
+							   const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &backward_bf_ops);
 	// debug functions
 	void DebugPrintGraph(const vector<JoinEdge> &edges) const;
 	void DebugPrintMST(const vector<JoinEdge> &mst_edges, const vector<BloomFilterOperation> &bf_operations);

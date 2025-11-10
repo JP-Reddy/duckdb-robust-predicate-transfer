@@ -14,6 +14,8 @@
 #include <fmt/format.h>
 
 namespace duckdb {
+class LogicalCreateBF;
+class LogicalUseBF;
 
 vector<JoinEdge> RPTOptimizerContextState::ExtractOperators(LogicalOperator &plan) {
 	vector<LogicalOperator*> join_ops;
@@ -166,7 +168,7 @@ vector<JoinEdge> RPTOptimizerContextState::CreateJoinEdges(vector<LogicalOperato
 	return edges;
 }
 
-vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) {
+vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) {
 	// step 1: find largest table by cardinality
 	idx_t largest_table_idx = 0;
 	idx_t max_cardinality = 0;
@@ -217,37 +219,7 @@ vector<BloomFilterOperation> RPTOptimizerContextState::LargestRoot(vector<JoinEd
 		mst_nodes.insert(best_edge->table_b);
 	}
 
-	// step 3: Convert MST edges to BloomFilterOperations
-	vector<BloomFilterOperation> bf_operations;
-
-	for (const JoinEdge &mst_edge: mst_edges) {
-		// for each edge, create a bf operation
-		// rule: CREATE_BF on a smaller table, USE_BF on a larger table
-
-		const idx_t left_cardinality = table_mgr.table_lookup[mst_edge.table_a].estimated_cardinality;
-		const idx_t right_cardinality = table_mgr.table_lookup[mst_edge.table_b].estimated_cardinality;
-
-		BloomFilterOperation bf_op;
-
-		if (left_cardinality <= right_cardinality) {
-			bf_op.build_table_idx = mst_edge.table_a;
-			bf_op.probe_table_idx = mst_edge.table_b;
-			bf_op.build_columns = mst_edge.join_columns_a;
-			bf_op.probe_columns = mst_edge.join_columns_b;
-		}
-		else {
-			bf_op.build_table_idx = mst_edge.table_b;
-			bf_op.probe_table_idx = mst_edge.table_a;
-			bf_op.build_columns = mst_edge.join_columns_b;
-			bf_op.probe_columns = mst_edge.join_columns_a;
-		}
-		bf_op.join_type = mst_edge.join_type;
-
-		bf_operations.push_back(bf_op);
-	}
-
-	DebugPrintMST(mst_edges, bf_operations);
-	return bf_operations;
+	return mst_edges;
 }
 
 void RPTOptimizerContextState::DebugPrintGraph(const vector<JoinEdge> &edges) const {
@@ -316,5 +288,135 @@ void RPTOptimizerContextState::DebugPrintMST(const vector<JoinEdge> &mst_edges, 
 	}
 	printf("\n");
 }
+
+// void RPTOptimizerContextState::CreateForwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
+// 															const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding> &larger_columns,
+// 															unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &forward_pass) {
+// 	BloomFilterOperation bf_op;
+// 	bf_op.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+// 	bf_op.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+// 	bf_op.build_columns = smaller_columns;
+// 	bf_op.probe_columns = larger_columns;
+// 	// bf_op.join_type = will be set when we have that info
+//
+// 	unique_ptr<LogicalOperator> create_bf = std::make_unique<LogicalCreateBF>(bf_op);
+// 	forward_pass[smaller_table_op] = std::move(create_bf);
+//
+// 	unique_ptr<LogicalOperator> use_bf = std::make_unique<LogicalUseBF>(bf_op);
+// 	forward_pass[larger_table_op] = std::move(use_bf);
+// }
+//
+// void RPTOptimizerContextState::CreateBackwardPassModifications(LogicalOperator *larger_table_op, LogicalOperator *smaller_table_op,
+// 															const vector<ColumnBinding> &larger_columns, const vector<ColumnBinding> &smaller_columns,
+// 															unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &backward_pass) {
+// 	BloomFilterOperation bf_op;
+// 	bf_op.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+// 	bf_op.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+// 	bf_op.build_columns = smaller_columns;
+// 	bf_op.probe_columns = larger_columns;
+// 	// bf_op.join_type = will be set when we have that info
+//
+// 	unique_ptr<LogicalOperator> create_bf = std::make_unique<LogicalCreateBF>(bf_op);
+// 	forward_pass[smaller_table_op] = std::move(create_bf);
+//
+// 	unique_ptr<LogicalOperator> use_bf = std::make_unique<LogicalUseBF>(bf_op);
+// 	forward_pass[larger_table_op] = std::move(use_bf);
+// }
+
+std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
+			unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
+RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
+
+	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> forward_bf_ops;
+	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> backward_bf_ops;
+
+	for (const JoinEdge &mst_edge: mst_edges) {
+		// for each edge, create a bf operation
+		// rule: CREATE_BF on a smaller table, USE_BF on a larger table
+
+		const idx_t left_cardinality = table_mgr.table_lookup[mst_edge.table_a].estimated_cardinality;
+		const idx_t right_cardinality = table_mgr.table_lookup[mst_edge.table_b].estimated_cardinality;
+
+		LogicalOperator* smaller_table_op;
+		LogicalOperator* larger_table_op;
+		vector<ColumnBinding> smaller_columns, larger_columns;
+
+		if (left_cardinality <= right_cardinality) {
+			smaller_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
+			larger_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
+			smaller_columns = mst_edge.join_columns_a;
+			larger_columns = mst_edge.join_columns_b;
+		}
+		else {
+			smaller_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
+			larger_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
+			smaller_columns = mst_edge.join_columns_b;
+			larger_columns = mst_edge.join_columns_a;
+		}
+
+		// forward pass: smaller → larger
+		// CREATE_BF on smaller table
+		BloomFilterOperation forward_create_bf;
+		forward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+		forward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+		forward_create_bf.build_columns = smaller_columns;
+		forward_create_bf.probe_columns = larger_columns;
+		forward_create_bf.is_create = true;
+
+		// USE_BF on larger table
+		BloomFilterOperation forward_use_bf;
+		forward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+		forward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+		forward_use_bf.build_columns = smaller_columns;
+		forward_use_bf.probe_columns = larger_columns;
+		forward_use_bf.is_create = false;
+
+		forward_bf_ops[smaller_table_op].push_back(forward_create_bf);
+		forward_bf_ops[larger_table_op].push_back(forward_use_bf);
+
+
+		// backward pass: larger → smaller
+		// CREATE_BF operation for larger table
+		BloomFilterOperation backward_create_bf;
+		backward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+		backward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+		backward_create_bf.build_columns = larger_columns;
+		backward_create_bf.probe_columns = smaller_columns;
+		backward_create_bf.is_create = true;
+
+		// USE_BF operation for smaller table
+		BloomFilterOperation backward_use_bf;
+		backward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+		backward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+		backward_use_bf.build_columns = larger_columns;
+		backward_use_bf.probe_columns = smaller_columns;
+		backward_use_bf.is_create = false;
+
+		backward_bf_ops[larger_table_op].push_back(backward_create_bf);
+		backward_bf_ops[smaller_table_op].push_back(backward_use_bf);
+	}
+	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
+}
+
+
+
+unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<LogicalOperator> plan) {
+
+	// step 1: extract join operators
+	vector<JoinEdge> edges = ExtractOperators(*plan);
+
+	// step 2: create transfer graph using LargestRoot algorithm
+	vector<JoinEdge> mst_edges = LargestRoot(edges);
+
+	// step 3: generate forward/backward pass using MST edges
+	auto [forward_pass, backward_pass] = GenerateStageModifications(mst_edges);
+
+	// step 4: insert create_bf/use_bf operators into the plan
+	// TODO: implement plan insertion logic
+
+
+	return plan;
+}
+
 
 } // namespace duckdb

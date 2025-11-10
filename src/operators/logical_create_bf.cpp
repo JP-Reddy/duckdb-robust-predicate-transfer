@@ -5,7 +5,7 @@
 #include "duckdb/main/config.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "physical_create_bf.hpp"
-
+#include "dag.hpp"
 
 #include <utility>
 
@@ -16,8 +16,8 @@ LogicalCreateBF::LogicalCreateBF() : LogicalExtensionOperator() {
 	message = "CREATE_BF";
 }
 
-LogicalCreateBF::LogicalCreateBF(vector<shared_ptr<FilterPlan>> filter_plans) 
-    : LogicalExtensionOperator(), filter_plans(std::move(filter_plans)) {
+LogicalCreateBF::LogicalCreateBF(const BloomFilterOperation &bf_op)
+    : LogicalExtensionOperator(), bf_operation(bf_op) {
 	this->type = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
 	message = "CREATE_BF";
 }
@@ -25,18 +25,18 @@ LogicalCreateBF::LogicalCreateBF(vector<shared_ptr<FilterPlan>> filter_plans)
 InsertionOrderPreservingMap<string> LogicalCreateBF::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
 	result["Operator"] = "LogicalCreateBF";
-	result["Filter Plans"] = std::to_string(filter_plans.size());
-	
-	// Add details about each filter plan
-	for (size_t i = 0; i < filter_plans.size(); i++) {
-		auto &plan = filter_plans[i];
-		if (plan) {
-			result["Build Expressions " + std::to_string(i)] = std::to_string(plan->build.size());
-			result["Apply Expressions " + std::to_string(i)] = std::to_string(plan->apply.size());
-			result["Build Columns " + std::to_string(i)] = std::to_string(plan->bound_cols_build.size());
-			result["Apply Columns " + std::to_string(i)] = std::to_string(plan->bound_cols_apply.size());
+	result["Build Table"] = to_string(bf_operation.build_table_idx);
+	result["Probe Table"] = to_string(bf_operation.probe_table_idx);
+
+	string build_cols = "";
+	for (size_t i = 0; i < bf_operation.build_columns.size(); i++) {
+		if (i > 0) {
+			build_cols += ", ";
 		}
+		build_cols += "(" + to_string(bf_operation.build_columns[i].table_index) +
+					 "." + to_string(bf_operation.build_columns[i].column_index) + ")";
 	}
+	result["Build Columns"] = build_cols;
 	
 	if (estimated_cardinality != DConstants::INVALID_INDEX) {
 		result["Estimated Cardinality"] = std::to_string(estimated_cardinality);
@@ -55,9 +55,18 @@ void LogicalCreateBF::ResolveTypes() {
 	}
 }
 
+shared_ptr<FilterPlan> BloomFilterOperationToFilterPlan(const BloomFilterOperation &bf_op) {
+	auto filter_plan = make_shared<FilterPlan>();
+	filter_plan->build = bf_op.build_columns;
+	filter_plan->apply = bf_op.probe_columns;
+	// filter_plan->return_types will be populated later during ResolveTypes()
+	return filter_plan;
+}
+
 PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
 	if (!physical) {
-		auto &physical_op = generator.Make<PhysicalCreateBF>(filter_plans, types, estimated_cardinality);
+		auto filter_plan = BloomFilterOperationToFilterPlan(bf_operation);
+		auto &physical_op = generator.Make<PhysicalCreateBF>(filter_plan, types, estimated_cardinality);
 		for (auto &child : children) {
 			auto &child_physical = generator.CreatePlan(*child);
 			physical_op.children.emplace_back(child_physical);
