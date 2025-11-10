@@ -13,7 +13,8 @@
 // #include "operators/physical_hello.hpp"
 #include "operators/logical_create_bf.hpp"
 #include "operators/logical_use_bf.hpp"
-#include "predicate_transfer_optimization.hpp"
+// #include "predicate_transfer_optimization.hpp"
+#include "optimizer/rpt_optimizer.hpp"
 
 // OpenSSL linked through vcpkg
 #include <openssl/opensslv.h>
@@ -45,8 +46,10 @@ public:
 static void LoadInternal(DatabaseInstance &instance) {
 	// Register the SIP optimizer rule
 	OptimizerExtension optimizer;
-	optimizer.optimize_function = PredicateTransferOptimizer::Optimize;
-	optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
+	// optimizer.optimize_function = PredicateTransferOptimizer::Optimize;
+	// optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
+	optimizer.optimize_function = RPTOptimizerContextState::Optimize;
+	// optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
 	instance.config.optimizer_extensions.push_back(optimizer);
 	
 	// Register logical operators

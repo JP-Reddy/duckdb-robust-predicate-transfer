@@ -26,9 +26,9 @@ set(EXTENSION_SOURCES
     src/operators/physical_create_bf.cpp
     src/operators/logical_use_bf.cpp
     src/operators/physical_use_bf.cpp
-    src/predicate_transfer_optimization.cpp
-    src/table_operator_manager.cpp
-    src/transfer_graph_manager.cpp
+#    src/predicate_transfer_optimization.cpp
+#    src/table_operator_manager.cpp
+#    src/transfer_graph_manager.cpp
     src/optimizer/rpt_optimizer.cpp
 #    src/optimizer/graph_manager.cpp
     src/optimizer/table_manager.cpp
