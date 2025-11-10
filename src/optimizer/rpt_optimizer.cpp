@@ -289,40 +289,6 @@ void RPTOptimizerContextState::DebugPrintMST(const vector<JoinEdge> &mst_edges, 
 	printf("\n");
 }
 
-// void RPTOptimizerContextState::CreateForwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
-// 															const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding> &larger_columns,
-// 															unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &forward_pass) {
-// 	BloomFilterOperation bf_op;
-// 	bf_op.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-// 	bf_op.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-// 	bf_op.build_columns = smaller_columns;
-// 	bf_op.probe_columns = larger_columns;
-// 	// bf_op.join_type = will be set when we have that info
-//
-// 	unique_ptr<LogicalOperator> create_bf = std::make_unique<LogicalCreateBF>(bf_op);
-// 	forward_pass[smaller_table_op] = std::move(create_bf);
-//
-// 	unique_ptr<LogicalOperator> use_bf = std::make_unique<LogicalUseBF>(bf_op);
-// 	forward_pass[larger_table_op] = std::move(use_bf);
-// }
-//
-// void RPTOptimizerContextState::CreateBackwardPassModifications(LogicalOperator *larger_table_op, LogicalOperator *smaller_table_op,
-// 															const vector<ColumnBinding> &larger_columns, const vector<ColumnBinding> &smaller_columns,
-// 															unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &backward_pass) {
-// 	BloomFilterOperation bf_op;
-// 	bf_op.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-// 	bf_op.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-// 	bf_op.build_columns = smaller_columns;
-// 	bf_op.probe_columns = larger_columns;
-// 	// bf_op.join_type = will be set when we have that info
-//
-// 	unique_ptr<LogicalOperator> create_bf = std::make_unique<LogicalCreateBF>(bf_op);
-// 	forward_pass[smaller_table_op] = std::move(create_bf);
-//
-// 	unique_ptr<LogicalOperator> use_bf = std::make_unique<LogicalUseBF>(bf_op);
-// 	forward_pass[larger_table_op] = std::move(use_bf);
-// }
-
 std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
 			unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
 RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
@@ -398,7 +364,90 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
 }
 
+unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(LogicalOperator* table_op,
+																			   const vector<BloomFilterOperation> &bf_ops,
+																			   bool reverse_order) {
+	if (bf_ops.empty()) {
+		return nullptr;
+	}
 
+	unique_ptr<LogicalOperator> current = nullptr;
+
+	if (reverse_order) {
+		// backward pass: iterate in reverse order
+		for (auto it = bf_ops.rbegin(); it != bf_ops.rend(); ++it) {
+			const auto &bf_op = *it;
+			unique_ptr<LogicalOperator> new_op;
+
+			if (bf_op.is_create) {
+				new_op = make_uniq<LogicalCreateBF>(bf_op);
+			} else {
+				new_op = make_uniq<LogicalUseBF>(bf_op);
+			}
+
+			if (current) {
+				new_op->AddChild(std::move(current));
+			}
+			current = std::move(new_op);
+		}
+	} else {
+		// forward pass: normal order
+		for (const auto &bf_op : bf_ops) {
+			unique_ptr<LogicalOperator> new_op;
+
+			if (bf_op.is_create) {
+				new_op = make_uniq<LogicalCreateBF>(bf_op);
+			} else {
+				new_op = make_uniq<LogicalUseBF>(bf_op);
+			}
+
+			if (current) {
+				new_op->AddChild(std::move(current));
+			}
+			current = std::move(new_op);
+		}
+	}
+
+	return current;
+}
+
+unique_ptr<LogicalOperator> RPTOptimizerContextState::ApplyStageModifications(unique_ptr<LogicalOperator> plan,
+																			  const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &forward_bf_ops,
+																			  const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &backward_bf_ops) {
+
+	// todo: validate the operator types
+
+	// first apply modifications to children recursively
+	for (auto &child : plan->children) {
+		child = ApplyStageModifications(std::move(child), forward_bf_ops, backward_bf_ops);
+	}
+
+	LogicalOperator* original_op = plan.get();
+
+	// add the forward pass bf operators above the base table operator
+	auto forward_it = forward_bf_ops.find(original_op);
+	if (forward_it != forward_bf_ops.end()) {
+		auto stacked_ops = BuildStackedBFOperators(original_op, forward_it->second, false); // Normal order
+		if (stacked_ops) {
+			// add original operator as child of the stacked operators
+			stacked_ops->AddChild(std::move(plan));
+			plan = std::move(stacked_ops);
+		}
+	}
+
+	// add the backward pass bf operators above the forward pass bf operators
+	auto backward_it = backward_bf_ops.find(original_op);
+	if (backward_it != backward_bf_ops.end()) {
+		auto stacked_ops = BuildStackedBFOperators(original_op, backward_it->second, true); // Reverse order
+		if (stacked_ops) {
+			// add current plan (which might already have forward pass bf operators) as child
+			stacked_ops->AddChild(std::move(plan));
+			plan = std::move(stacked_ops);
+		}
+	}
+
+	return plan;
+}
 
 unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<LogicalOperator> plan) {
 
@@ -409,11 +458,12 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	vector<JoinEdge> mst_edges = LargestRoot(edges);
 
 	// step 3: generate forward/backward pass using MST edges
-	auto [forward_pass, backward_pass] = GenerateStageModifications(mst_edges);
+	const auto bf_ops = GenerateStageModifications(mst_edges);
+	const unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops = bf_ops.first;
+	const unordered_map<LogicalOperator *, vector<BloomFilterOperation>> backward_bf_ops = bf_ops.second;
 
 	// step 4: insert create_bf/use_bf operators into the plan
-	// TODO: implement plan insertion logic
-
+	plan = ApplyStageModifications(std::move(plan), forward_bf_ops, backward_bf_ops);
 
 	return plan;
 }
