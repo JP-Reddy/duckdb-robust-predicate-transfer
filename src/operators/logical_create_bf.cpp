@@ -55,18 +55,40 @@ void LogicalCreateBF::ResolveTypes() {
 	}
 }
 
-shared_ptr<FilterPlan> BloomFilterOperationToFilterPlan(const BloomFilterOperation &bf_op) {
-	auto filter_plan = make_shared<FilterPlan>();
-	filter_plan->build = bf_op.build_columns;
-	filter_plan->apply = bf_op.probe_columns;
-	// filter_plan->return_types will be populated later during ResolveTypes()
-	return filter_plan;
-}
+// shared_ptr<FilterPlan> BloomFilterOperationToFilterPlan(const BloomFilterOperation &bf_op) {
+// 	auto filter_plan = make_shared<FilterPlan>();
+// 	filter_plan->build = bf_op.build_columns;
+// 	filter_plan->apply = bf_op.probe_columns;
+// 	// filter_plan->return_types will be populated later during ResolveTypes()
+// 	return filter_plan;
+// }
 
 PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
 	if (!physical) {
-		auto filter_plan = BloomFilterOperationToFilterPlan(bf_operation);
-		auto &physical_op = generator.Make<PhysicalCreateBF>(filter_plan, types, estimated_cardinality);
+		// step 1: get child column bindings to understand chunk schema
+		vector<ColumnBinding> child_bindings = children[0]->GetColumnBindings();
+
+		// step 2: resolve/map the bf operation columns to chunk column indices
+		vector<idx_t> resolved_indices;
+		for (const ColumnBinding &column_binding: bf_operation.build_columns) {
+			// find the position of the bf column ColumnBinding in the chunk columns
+			for (idx_t i = 0; i < child_bindings.size(); i++) {
+				if (child_bindings[i].table_index == column_binding.table_index &&
+					child_bindings[i].column_index == column_binding.column_index) {
+					resolved_indices.push_back(i);
+					break;
+				}
+			}
+		}
+
+		// step 3: create physical operator with the resolved indices
+		PhysicalOperator &physical_op = generator.Make<PhysicalCreateBF>(
+			  make_shared_ptr<BloomFilterOperation>(bf_operation),
+			  types,
+			  estimated_cardinality,
+			  resolved_indices);
+		// auto filter_plan = BloomFilterOperationToFilterPlan(bf_operation);
+		// auto &physical_op = generator.Make<PhysicalCreateBF>(make_shared<BloomFilterOperation>(bf_operation), types, estimated_cardinality);
 		for (auto &child : children) {
 			auto &child_physical = generator.CreatePlan(*child);
 			physical_op.children.emplace_back(child_physical);

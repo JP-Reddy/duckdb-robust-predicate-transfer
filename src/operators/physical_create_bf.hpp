@@ -3,7 +3,7 @@
 #include "duckdb/execution/physical_operator.hpp"
 #include "dag.hpp"
 #include "bloom_filter.hpp"
-
+#include "../optimizer/graph_manager.hpp"
 namespace duckdb {
 
 class PhysicalCreateBFLocalSinkState : public LocalSinkState {
@@ -24,8 +24,8 @@ public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 public:
-	PhysicalCreateBF(const vector<shared_ptr<FilterPlan>> &filter_plans, vector<LogicalType> types,
-	                 idx_t estimated_cardinality);
+	PhysicalCreateBF(const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
+	                 idx_t estimated_cardinality, vector<idx_t> bound_column_indices);
 
 	// Required virtual methods
 	virtual ~PhysicalCreateBF() = default;
@@ -45,8 +45,12 @@ public:
 		return true;
 	}
 public:
-	vector<shared_ptr<FilterPlan>> filter_plans;
+	// vector<shared_ptr<FilterPlan>> filter_plans;
+	shared_ptr<BloomFilterOperation> bf_operation;
 	bool is_probing_side;
+
+	// maps the column indices to resolved chunk column positions
+	vector<idx_t> bound_column_indices;
 
 	// access to created bloom filters for PhysicalUseBF operators
 	vector<shared_ptr<BloomFilter>> GetBloomFilters() const;

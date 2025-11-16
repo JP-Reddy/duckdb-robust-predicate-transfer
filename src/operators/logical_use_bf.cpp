@@ -50,7 +50,7 @@ void LogicalUseBF::ResolveTypes() {
 }
 
 shared_ptr<FilterPlan> BloomFilterOperationToFilterPlan(const BloomFilterOperation &bf_op) {
-	auto filter_plan = make_shared<FilterPlan>();
+	auto filter_plan = make_shared_ptr<FilterPlan>();
 	filter_plan->build = bf_op.build_columns;
 	filter_plan->apply = bf_op.probe_columns;
 	// filter_plan->return_types will be populated later during ResolveTypes()

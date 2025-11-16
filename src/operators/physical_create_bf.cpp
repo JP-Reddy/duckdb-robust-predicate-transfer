@@ -8,10 +8,10 @@
 
 namespace duckdb {
 
-PhysicalCreateBF::PhysicalCreateBF(const vector<shared_ptr<FilterPlan>> &filter_plans, vector<LogicalType> types, 
-                                   idx_t estimated_cardinality)
+PhysicalCreateBF::PhysicalCreateBF(const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
+                                   idx_t estimated_cardinality, vector<idx_t> bound_column_indices)
     : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
-      filter_plans(filter_plans), is_probing_side(false) {
+      bf_operation(bf_operation), is_probing_side(false), bound_column_indices(std::move(bound_column_indices)) {
 }
 
 string PhysicalCreateBF::GetName() const {
@@ -20,7 +20,7 @@ string PhysicalCreateBF::GetName() const {
 
 string PhysicalCreateBF::ToString(ExplainFormat format) const {
     string result = "CREATE_BF";
-    result += " [" + std::to_string(filter_plans.size()) + " filters]";
+    result += " [" + std::to_string(bf_operation->build_columns.size()) + " filters]";
     return result;
 }
 
@@ -28,8 +28,8 @@ unique_ptr<GlobalSinkState> PhysicalCreateBF::GetGlobalSinkState(ClientContext &
     auto state = make_uniq<PhysicalCreateBFGlobalSinkState>();
     
     // initialize bloom filters for each filter plan
-    state->bloom_filters.reserve(filter_plans.size());
-    for (size_t i = 0; i < filter_plans.size(); i++) {
+    state->bloom_filters.reserve(bf_operation->build_columns.size());
+    for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
         auto bf = make_shared_ptr<BloomFilter>();
         state->bloom_filters.push_back(bf);
     }
@@ -50,18 +50,18 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
     if (chunk.size() > 0) {
         lock_guard<mutex> bf_guard(gstate.bf_lock);
 
-        // process each filter plan
-        for (size_t i = 0; i < filter_plans.size() && i < gstate.bloom_filters.size(); i++) {
-            auto &plan = filter_plans[i];
+        // process each bloom filter operation
+        for (size_t i = 0; i < bf_operation->build_columns.size() && i < gstate.bloom_filters.size(); i++) {
             auto &bf = gstate.bloom_filters[i];
 
-            if (plan && bf && !plan->bound_cols_build.empty()) {
-                // simplified version: use bound column indices directly from input chunk
-                // note: this assumes the chunk already contains the correct columns
-                bf->Insert(chunk, plan->bound_cols_build);
-                printf("  inserted %llu rows into bloom filter %zu\n", chunk.size(), i);
+            if (bf) {
+            	idx_t chunked_column_index = bound_column_indices[i];
+                bf->Insert(chunk, {chunked_column_index});
+            	printf("  inserted %llu rows into bloom filter %zu (chunk column %llu)\n",
+						 chunk.size(), i, chunked_column_index);
             }
         }
+
     }
 
     return SinkResultType::NEED_MORE_INPUT;

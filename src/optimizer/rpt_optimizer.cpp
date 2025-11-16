@@ -10,12 +10,13 @@
 #include <algorithm>
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/unordered_map.hpp"
-
+#include "../operators/logical_create_bf.hpp"
+#include "../operators/logical_use_bf.hpp"
 #include <fmt/format.h>
 
 namespace duckdb {
-class LogicalCreateBF;
-class LogicalUseBF;
+// class LogicalCreateBF;
+// class LogicalUseBF;
 
 vector<JoinEdge> RPTOptimizerContextState::ExtractOperators(LogicalOperator &plan) {
 	vector<LogicalOperator*> join_ops;
@@ -37,7 +38,7 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 
 	LogicalOperator *op = &plan;
 
-	// step 1: collect all join edges
+	// step 1: collect all join operators
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN ||
 		op->type == LogicalOperatorType::LOGICAL_DELIM_JOIN) {
 		LogicalComparisonJoin &join = op->Cast<LogicalComparisonJoin>();
@@ -468,5 +469,28 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	return plan;
 }
 
+
+// extension hooks
+// void PredicateTransferOptimizer::PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+// 	// create optimizer state using proper DuckDB state management
+// 	auto optimizer_state = input.context.registered_state->GetOrCreate<PredicateTransferOptimizer>(
+// 		"rpt_optimizer_state", input.context);
+//
+// 	plan = optimizer_state->PreOptimize(std::move(plan));
+// }
+
+void RPTOptimizerContextState::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+	// retrieve the optimizer state from ClientContext
+	const auto optimizer_state = input.context.registered_state->GetOrCreate<RPTOptimizerContextState>("rpt_optimizer_state", input.context);
+	// if (!optimizer_state) {
+	// 	optimizer_state = input.context.registered_state->GetOrCreate<PredicateTransferOptimizer>(
+	// 		"rpt_optimizer_state", input.context);
+	// }
+
+	plan = optimizer_state->Optimize(std::move(plan));
+
+	// cleanup
+	input.context.registered_state->Remove("rpt_optimizer_state");
+}
 
 } // namespace duckdb
