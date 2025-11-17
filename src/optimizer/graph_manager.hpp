@@ -41,6 +41,7 @@ typedef idx_t table_id;
 		vector<ColumnBinding> build_columns;
 		vector<ColumnBinding> probe_columns;
 		JoinType join_type;
+		idx_t sequence_number; // for preserving generation order
 	};
 
 } // namespace duckdb

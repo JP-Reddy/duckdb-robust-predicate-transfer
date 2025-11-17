@@ -180,6 +180,8 @@ vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) 
 		}
 	}
 
+	// print largest table idx
+	printf("Largest table: %llu, cardinality: %llu\n", largest_table_idx, max_cardinality);
 	DebugPrintGraph(edges);
 
 	// step 2: build MST (maximum) using Prim's algorithm starting from largest table
@@ -187,6 +189,9 @@ vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) 
 	vector<JoinEdge> mst_edges;
 
 	mst_nodes.insert(largest_table_idx);
+
+	// print table ops size
+	printf("Table ops size: %zu\n", table_mgr.table_ops.size());
 
 	while (mst_nodes.size() < table_mgr.table_ops.size() && !edges.empty()) {
 		const JoinEdge *best_edge = nullptr;
@@ -210,7 +215,11 @@ vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) 
 			}
 		}
 
+		if (best_edge) {
+			printf("Best edge: %llu <-> %llu (weight=%llu)\n", best_edge->table_a, best_edge->table_b, best_edge->weight);
+		}
 		if (!best_edge) {
+
 			printf("Warning - Disconnected components found. MST incomplete.\n");
 			break;
 		}
@@ -221,6 +230,73 @@ vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) 
 	}
 
 	return mst_edges;
+}
+
+TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges) {
+	// step 1: find largest table (root)
+	idx_t root_table_idx = 0;
+	idx_t max_cardinality = 0;
+	LogicalOperator* root_op = nullptr;
+
+	for (const auto &table_info : table_mgr.table_ops) {
+		if (table_info.estimated_cardinality > max_cardinality) {
+			max_cardinality = table_info.estimated_cardinality;
+			root_table_idx = table_info.table_idx;
+			root_op = table_info.table_op;
+		}
+	}
+
+	printf("BuildRootedTree: root table = %llu (cardinality=%llu)\n", root_table_idx, max_cardinality);
+
+	// step 2: create nodes for all tables
+	unordered_map<idx_t, TreeNode*> table_to_node;
+	for (const auto &table_info : table_mgr.table_ops) {
+		auto* node = new TreeNode(table_info.table_idx, table_info.table_op);
+		table_to_node[table_info.table_idx] = node;
+	}
+
+	// step 3: build adjacency list from MST edges (undirected)
+	unordered_map<idx_t, vector<pair<idx_t, JoinEdge*>>> adjacency;
+	for (auto &edge : mst_edges) {
+		adjacency[edge.table_a].push_back({edge.table_b, &edge});
+		adjacency[edge.table_b].push_back({edge.table_a, &edge});
+	}
+
+	// step 4: BFS from root to assign parent-child relationships and levels
+	vector<idx_t> queue;
+	unordered_set<idx_t> visited;
+
+	queue.push_back(root_table_idx);
+	visited.insert(root_table_idx);
+	table_to_node[root_table_idx]->level = 0;
+
+	size_t front = 0;
+	while (front < queue.size()) {
+		idx_t current = queue[front++];
+		TreeNode* current_node = table_to_node[current];
+
+		printf("  Visiting table %llu at level %d\n", current, current_node->level);
+
+		// process all neighbors
+		for (auto &[neighbor_idx, edge] : adjacency[current]) {
+			if (visited.count(neighbor_idx) == 0) {
+				// neighbor is a child of current
+				TreeNode* child_node = table_to_node[neighbor_idx];
+				child_node->parent = current_node;
+				child_node->level = current_node->level + 1;
+				child_node->edge_to_parent = edge;
+
+				current_node->children.push_back(child_node);
+
+				queue.push_back(neighbor_idx);
+				visited.insert(neighbor_idx);
+
+				printf("    Child: table %llu at level %d\n", neighbor_idx, child_node->level);
+			}
+		}
+	}
+
+	return table_to_node[root_table_idx];
 }
 
 void RPTOptimizerContextState::DebugPrintGraph(const vector<JoinEdge> &edges) const {
@@ -274,96 +350,240 @@ void RPTOptimizerContextState::DebugPrintMST(const vector<JoinEdge> &mst_edges, 
 	printf("=== BLOOM FILTER OPERATIONS ===\n");
 	for (size_t i = 0; i < bf_operations.size(); i++) {
 		const auto &bf_op = bf_operations[i];
-		printf("BF Op %zu: CREATE_BF on table %llu -> USE_BF on table %llu\n",
-			i, bf_op.build_table_idx, bf_op.probe_table_idx);
 
-		printf("  Build columns: ");
-		for (const auto &col : bf_op.build_columns) {
-			printf("(%llu.%llu) ", col.table_index, col.column_index);
+		if (bf_op.is_create) {
+			// CREATE operation
+			printf("BF Op %zu: CREATE_BF on table %llu\n", i, bf_op.build_table_idx);
+			printf("  Build columns: ");
+			for (const auto &col : bf_op.build_columns) {
+				printf("(%llu.%llu) ", col.table_index, col.column_index);
+			}
+			printf("\n");
+		} else {
+			// USE operation
+			printf("BF Op %zu: USE_BF on table %llu (using BF from table %llu)\n",
+				   i, bf_op.probe_table_idx, bf_op.build_table_idx);
+			printf("  Build columns: ");
+			for (const auto &col : bf_op.build_columns) {
+				printf("(%llu.%llu) ", col.table_index, col.column_index);
+			}
+			printf("\n  Probe columns: ");
+			for (const auto &col : bf_op.probe_columns) {
+				printf("(%llu.%llu) ", col.table_index, col.column_index);
+			}
+			printf("\n");
 		}
-		printf("\n  Probe columns: ");
-		for (const auto &col : bf_op.probe_columns) {
-			printf("(%llu.%llu) ", col.table_index, col.column_index);
-		}
-		printf("\n");
 	}
 	printf("\n");
 }
 
 std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
-			unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
+          unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
 RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
+
+	// step 1: build rooted tree from MST
+	TreeNode* root = BuildRootedTree(const_cast<vector<JoinEdge>&>(mst_edges));
+
+	// step 2: collect all nodes organized by level
+	unordered_map<int, vector<TreeNode*>> nodes_by_level;
+	int max_level = 0;
+
+	// BFS to collect nodes by level
+	vector<TreeNode*> queue;
+	queue.push_back(root);
+	size_t front = 0;
+
+	while (front < queue.size()) {
+		TreeNode* node = queue[front++];
+		nodes_by_level[node->level].push_back(node);
+		max_level = std::max(max_level, node->level);
+
+		for (TreeNode* child : node->children) {
+			queue.push_back(child);
+		}
+	}
+
+	printf("=== TREE LEVELS ===\n");
+	for (int level = 0; level <= max_level; level++) {
+		printf("Level %d: ", level);
+		for (TreeNode* node : nodes_by_level[level]) {
+			printf("table_%llu ", node->table_idx);
+		}
+		printf("\n");
+	}
+	printf("\n");
 
 	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> forward_bf_ops;
 	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> backward_bf_ops;
 
-	for (const JoinEdge &mst_edge: mst_edges) {
-		// for each edge, create a bf operation
-		// rule: CREATE_BF on a smaller table, USE_BF on a larger table
+	// sequence counter to preserve operation order
+	idx_t sequence = 0;
 
-		const idx_t left_cardinality = table_mgr.table_lookup[mst_edge.table_a].estimated_cardinality;
-		const idx_t right_cardinality = table_mgr.table_lookup[mst_edge.table_b].estimated_cardinality;
+	// step 3: forward pass - bottom-up (leaves to root)
+	// process levels from highest (leaves) down to 1
+	printf("=== FORWARD PASS (leaves → root) ===\n");
+	for (int level = max_level; level >= 1; level--) {
+		for (TreeNode* child_node : nodes_by_level[level]) {
+			TreeNode* parent_node = child_node->parent;
+			JoinEdge* edge = child_node->edge_to_parent;
 
-		LogicalOperator* smaller_table_op;
-		LogicalOperator* larger_table_op;
-		vector<ColumnBinding> smaller_columns, larger_columns;
+			// determine which columns belong to child and which to parent
+			vector<ColumnBinding> child_columns, parent_columns;
 
-		if (left_cardinality <= right_cardinality) {
-			smaller_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
-			larger_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
-			smaller_columns = mst_edge.join_columns_a;
-			larger_columns = mst_edge.join_columns_b;
+			if (edge->table_a == child_node->table_idx) {
+				child_columns = edge->join_columns_a;
+				parent_columns = edge->join_columns_b;
+			} else {
+				child_columns = edge->join_columns_b;
+				parent_columns = edge->join_columns_a;
+			}
+
+			printf("  Level %d: table_%llu (child) CREATE → table_%llu (parent) USE\n",
+				   level, child_node->table_idx, parent_node->table_idx);
+
+			// CREATE_BF on child
+			BloomFilterOperation create_op;
+			create_op.build_table_idx = child_node->table_idx;
+			create_op.probe_table_idx = 0; // not used for CREATE operations
+			create_op.build_columns = child_columns;
+			create_op.is_create = true;
+			create_op.sequence_number = sequence++;
+			forward_bf_ops[child_node->table_op].push_back(create_op);
+
+			// USE_BF on parent
+			BloomFilterOperation use_op;
+			use_op.build_table_idx = child_node->table_idx;
+			use_op.probe_table_idx = parent_node->table_idx;
+			use_op.build_columns = child_columns;
+			use_op.probe_columns = parent_columns;
+			use_op.is_create = false;
+			use_op.sequence_number = sequence++;
+			forward_bf_ops[parent_node->table_op].push_back(use_op);
 		}
-		else {
-			smaller_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
-			larger_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
-			smaller_columns = mst_edge.join_columns_b;
-			larger_columns = mst_edge.join_columns_a;
-		}
-
-		// forward pass: smaller → larger
-		// CREATE_BF on smaller table
-		BloomFilterOperation forward_create_bf;
-		forward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-		forward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-		forward_create_bf.build_columns = smaller_columns;
-		forward_create_bf.probe_columns = larger_columns;
-		forward_create_bf.is_create = true;
-
-		// USE_BF on larger table
-		BloomFilterOperation forward_use_bf;
-		forward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-		forward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-		forward_use_bf.build_columns = smaller_columns;
-		forward_use_bf.probe_columns = larger_columns;
-		forward_use_bf.is_create = false;
-
-		forward_bf_ops[smaller_table_op].push_back(forward_create_bf);
-		forward_bf_ops[larger_table_op].push_back(forward_use_bf);
-
-
-		// backward pass: larger → smaller
-		// CREATE_BF operation for larger table
-		BloomFilterOperation backward_create_bf;
-		backward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-		backward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-		backward_create_bf.build_columns = larger_columns;
-		backward_create_bf.probe_columns = smaller_columns;
-		backward_create_bf.is_create = true;
-
-		// USE_BF operation for smaller table
-		BloomFilterOperation backward_use_bf;
-		backward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-		backward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-		backward_use_bf.build_columns = larger_columns;
-		backward_use_bf.probe_columns = smaller_columns;
-		backward_use_bf.is_create = false;
-
-		backward_bf_ops[larger_table_op].push_back(backward_create_bf);
-		backward_bf_ops[smaller_table_op].push_back(backward_use_bf);
 	}
+	printf("\n");
+
+	// step 4: backward pass - top-down (root to leaves)
+	// process levels from 1 to max_level
+	printf("=== BACKWARD PASS (root → leaves) ===\n");
+	for (int level = 1; level <= max_level; level++) {
+		for (TreeNode* child_node : nodes_by_level[level]) {
+			TreeNode* parent_node = child_node->parent;
+			JoinEdge* edge = child_node->edge_to_parent;
+
+			// determine which columns belong to parent and which to child
+			vector<ColumnBinding> parent_columns, child_columns;
+
+			if (edge->table_a == parent_node->table_idx) {
+				parent_columns = edge->join_columns_a;
+				child_columns = edge->join_columns_b;
+			} else {
+				parent_columns = edge->join_columns_b;
+				child_columns = edge->join_columns_a;
+			}
+
+			printf("  Level %d: table_%llu (parent) CREATE → table_%llu (child) USE\n",
+				   level, parent_node->table_idx, child_node->table_idx);
+
+			// CREATE_BF on parent
+			BloomFilterOperation create_op;
+			create_op.build_table_idx = parent_node->table_idx;
+			create_op.probe_table_idx = 0; // not used for CREATE operations
+			create_op.build_columns = parent_columns;
+			create_op.is_create = true;
+			create_op.sequence_number = sequence++;
+			backward_bf_ops[parent_node->table_op].push_back(create_op);
+
+			// USE_BF on child
+			BloomFilterOperation use_op;
+			use_op.build_table_idx = parent_node->table_idx;
+			use_op.probe_table_idx = child_node->table_idx;
+			use_op.build_columns = parent_columns;
+			use_op.probe_columns = child_columns;
+			use_op.is_create = false;
+			use_op.sequence_number = sequence++;
+			backward_bf_ops[child_node->table_op].push_back(use_op);
+		}
+	}
+	printf("\n");
+
 	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
 }
+
+// std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
+// 			unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
+// RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
+//
+// 	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> forward_bf_ops;
+// 	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> backward_bf_ops;
+//
+// 	for (const JoinEdge &mst_edge: mst_edges) {
+// 		// for each edge, create a bf operation
+// 		// rule: CREATE_BF on a smaller table, USE_BF on a larger table
+//
+// 		const idx_t left_cardinality = table_mgr.table_lookup[mst_edge.table_a].estimated_cardinality;
+// 		const idx_t right_cardinality = table_mgr.table_lookup[mst_edge.table_b].estimated_cardinality;
+//
+// 		LogicalOperator* smaller_table_op;
+// 		LogicalOperator* larger_table_op;
+// 		vector<ColumnBinding> smaller_columns, larger_columns;
+//
+// 		if (left_cardinality <= right_cardinality) {
+// 			smaller_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
+// 			larger_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
+// 			smaller_columns = mst_edge.join_columns_a;
+// 			larger_columns = mst_edge.join_columns_b;
+// 		}
+// 		else {
+// 			smaller_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
+// 			larger_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
+// 			smaller_columns = mst_edge.join_columns_b;
+// 			larger_columns = mst_edge.join_columns_a;
+// 		}
+//
+// 		// forward pass: smaller → larger
+// 		// CREATE_BF on smaller table
+// 		BloomFilterOperation forward_create_bf;
+// 		forward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+// 		forward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+// 		forward_create_bf.build_columns = smaller_columns;
+// 		forward_create_bf.probe_columns = larger_columns;
+// 		forward_create_bf.is_create = true;
+//
+// 		// USE_BF on larger table
+// 		BloomFilterOperation forward_use_bf;
+// 		forward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+// 		forward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+// 		forward_use_bf.build_columns = smaller_columns;
+// 		forward_use_bf.probe_columns = larger_columns;
+// 		forward_use_bf.is_create = false;
+//
+// 		forward_bf_ops[smaller_table_op].push_back(forward_create_bf);
+// 		forward_bf_ops[larger_table_op].push_back(forward_use_bf);
+//
+//
+// 		// backward pass: larger → smaller
+// 		// CREATE_BF operation for larger table
+// 		BloomFilterOperation backward_create_bf;
+// 		backward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+// 		backward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+// 		backward_create_bf.build_columns = larger_columns;
+// 		backward_create_bf.probe_columns = smaller_columns;
+// 		backward_create_bf.is_create = true;
+//
+// 		// USE_BF operation for smaller table
+// 		BloomFilterOperation backward_use_bf;
+// 		backward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
+// 		backward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
+// 		backward_use_bf.build_columns = larger_columns;
+// 		backward_use_bf.probe_columns = smaller_columns;
+// 		backward_use_bf.is_create = false;
+//
+// 		backward_bf_ops[larger_table_op].push_back(backward_create_bf);
+// 		backward_bf_ops[smaller_table_op].push_back(backward_use_bf);
+// 	}
+// 	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
+// }
 
 unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(LogicalOperator* table_op,
 																			   const vector<BloomFilterOperation> &bf_ops,
@@ -466,6 +686,23 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	// step 4: insert create_bf/use_bf operators into the plan
 	plan = ApplyStageModifications(std::move(plan), forward_bf_ops, backward_bf_ops);
 
+	// combine all bloom filter operations for debug (preserving order)
+	vector<BloomFilterOperation> all_bf_operations;
+	for (const auto &pair : bf_ops.first) {
+		all_bf_operations.insert(all_bf_operations.end(), pair.second.begin(), pair.second.end());
+	}
+	for (const auto &pair : bf_ops.second) {
+		all_bf_operations.insert(all_bf_operations.end(), pair.second.begin(), pair.second.end());
+	}
+
+	// sort by sequence number to restore generation order
+	std::sort(all_bf_operations.begin(), all_bf_operations.end(),
+		[](const BloomFilterOperation &a, const BloomFilterOperation &b) {
+			return a.sequence_number < b.sequence_number;
+		});
+
+	// debug print with correct ordering
+	DebugPrintMST(mst_edges, all_bf_operations);
 	return plan;
 }
 

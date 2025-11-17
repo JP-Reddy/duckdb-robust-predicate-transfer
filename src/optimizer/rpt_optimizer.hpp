@@ -8,6 +8,19 @@
 
 namespace duckdb {
 
+// tree node for rooted MST representation
+struct TreeNode {
+	idx_t table_idx;
+	LogicalOperator* table_op;
+	vector<TreeNode*> children;
+	TreeNode* parent;
+	int level; // distance from root (root = 0)
+	JoinEdge* edge_to_parent; // null for root
+
+	TreeNode(idx_t idx, LogicalOperator* op)
+		: table_idx(idx), table_op(op), parent(nullptr), level(0), edge_to_parent(nullptr) {}
+};
+
 class RPTOptimizerContextState : public ClientContextState {
 public:
 	explicit RPTOptimizerContextState(ClientContext &context) {}
@@ -27,6 +40,9 @@ public:
 	void ExtractOperatorsRecursive(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
 	vector<JoinEdge> CreateJoinEdges(vector<LogicalOperator*> &join_ops);
 	vector<JoinEdge> LargestRoot(vector<JoinEdge> &edges);
+
+	// build rooted tree from MST edges with largest table as root
+	TreeNode* BuildRootedTree(vector<JoinEdge> &mst_edges);
 
 	// void CreateForwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
 	// 														const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding> &larger_columns,
