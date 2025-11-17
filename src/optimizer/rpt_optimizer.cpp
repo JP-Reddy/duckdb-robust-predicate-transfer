@@ -450,13 +450,17 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::ApplyStageModifications(un
 	return plan;
 }
 
-unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<LogicalOperator> plan) {
-
+unique_ptr<LogicalOperator> RPTOptimizerContextState::PreOptimize(unique_ptr<LogicalOperator> plan) {
 	// step 1: extract join operators
 	vector<JoinEdge> edges = ExtractOperators(*plan);
 
 	// step 2: create transfer graph using LargestRoot algorithm
-	vector<JoinEdge> mst_edges = LargestRoot(edges);
+	mst_edges = LargestRoot(edges);
+
+	return plan;
+}
+
+unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<LogicalOperator> plan) {
 
 	// step 3: generate forward/backward pass using MST edges
 	const auto bf_ops = GenerateStageModifications(mst_edges);
@@ -478,6 +482,14 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 //
 // 	plan = optimizer_state->PreOptimize(std::move(plan));
 // }
+
+void RPTOptimizerContextState::PreOptimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+	auto optimizer_state = input.context.registered_state->GetOrCreate<RPTOptimizerContextState>(
+	"rpt_optimizer_state", input.context);
+
+	plan = optimizer_state->PreOptimize(std::move(plan));
+}
+
 
 void RPTOptimizerContextState::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
 	// retrieve the optimizer state from ClientContext

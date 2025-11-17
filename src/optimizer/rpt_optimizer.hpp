@@ -18,6 +18,7 @@ public:
 
 	TableManager table_mgr;
 	vector<LogicalOperator*> join_ops;
+	vector<JoinEdge> mst_edges;
 
 	unordered_map<ColumnBinding, ColumnBinding, ColumnBindingHashFunction> rename_col_bindings;
 public:
