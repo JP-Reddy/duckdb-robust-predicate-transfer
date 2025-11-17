@@ -585,20 +585,26 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 // 	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
 // }
 
-unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(LogicalOperator* table_op,
+unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator> base_plan,
 																			   const vector<BloomFilterOperation> &bf_ops,
 																			   bool reverse_order) {
 	if (bf_ops.empty()) {
-		return nullptr;
+		return base_plan;
 	}
 
-	unique_ptr<LogicalOperator> current = nullptr;
+	printf("BuildStackedBF: Processing %zu ops, reverse=%d\n", bf_ops.size(), reverse_order);
+
+	// start with the base plan at the bottom
+	unique_ptr<LogicalOperator> current = std::move(base_plan);
 
 	if (reverse_order) {
-		// backward pass: iterate in reverse order
-		for (auto it = bf_ops.rbegin(); it != bf_ops.rend(); ++it) {
-			const auto &bf_op = *it;
+		// backward pass: normal iteration (ops already in correct order in vector)
+		int iter = 0;
+		for (const auto &bf_op : bf_ops) {
 			unique_ptr<LogicalOperator> new_op;
+
+			printf("  Bwd iter %d: %s on table %llu\n", iter++, bf_op.is_create ? "CREATE" : "USE",
+				   bf_op.is_create ? bf_op.build_table_idx : bf_op.probe_table_idx);
 
 			if (bf_op.is_create) {
 				new_op = make_uniq<LogicalCreateBF>(bf_op);
@@ -606,15 +612,17 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(Lo
 				new_op = make_uniq<LogicalUseBF>(bf_op);
 			}
 
-			if (current) {
-				new_op->AddChild(std::move(current));
-			}
+			new_op->AddChild(std::move(current));
 			current = std::move(new_op);
 		}
 	} else {
 		// forward pass: normal order
+		int iter = 0;
 		for (const auto &bf_op : bf_ops) {
 			unique_ptr<LogicalOperator> new_op;
+
+			printf("  Fwd iter %d: %s on table %llu\n", iter++, bf_op.is_create ? "CREATE" : "USE",
+				   bf_op.is_create ? bf_op.build_table_idx : bf_op.probe_table_idx);
 
 			if (bf_op.is_create) {
 				new_op = make_uniq<LogicalCreateBF>(bf_op);
@@ -622,21 +630,18 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(Lo
 				new_op = make_uniq<LogicalUseBF>(bf_op);
 			}
 
-			if (current) {
-				new_op->AddChild(std::move(current));
-			}
+			new_op->AddChild(std::move(current));
 			current = std::move(new_op);
 		}
 	}
 
+	printf("BuildStackedBF: Done, returning operator\n");
 	return current;
 }
 
 unique_ptr<LogicalOperator> RPTOptimizerContextState::ApplyStageModifications(unique_ptr<LogicalOperator> plan,
 																			  const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &forward_bf_ops,
 																			  const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &backward_bf_ops) {
-
-	// todo: validate the operator types
 
 	// first apply modifications to children recursively
 	for (auto &child : plan->children) {
@@ -648,23 +653,19 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::ApplyStageModifications(un
 	// add the forward pass bf operators above the base table operator
 	auto forward_it = forward_bf_ops.find(original_op);
 	if (forward_it != forward_bf_ops.end()) {
-		auto stacked_ops = BuildStackedBFOperators(original_op, forward_it->second, false); // Normal order
-		if (stacked_ops) {
-			// add original operator as child of the stacked operators
-			stacked_ops->AddChild(std::move(plan));
-			plan = std::move(stacked_ops);
-		}
+		printf("ApplyStage: Found %zu forward ops for operator %p\n", forward_it->second.size(), original_op);
+		plan = BuildStackedBFOperators(std::move(plan), forward_it->second, false);
 	}
 
 	// add the backward pass bf operators above the forward pass bf operators
 	auto backward_it = backward_bf_ops.find(original_op);
 	if (backward_it != backward_bf_ops.end()) {
-		auto stacked_ops = BuildStackedBFOperators(original_op, backward_it->second, true); // Reverse order
-		if (stacked_ops) {
-			// add current plan (which might already have forward pass bf operators) as child
-			stacked_ops->AddChild(std::move(plan));
-			plan = std::move(stacked_ops);
+		printf("ApplyStage: Found %zu backward ops for operator %p\n", backward_it->second.size(), original_op);
+		for (size_t i = 0; i < backward_it->second.size(); i++) {
+			const auto &op = backward_it->second[i];
+			printf("  Backward op %zu: %s on table %llu\n", i, op.is_create ? "CREATE" : "USE", op.is_create ? op.build_table_idx : op.probe_table_idx);
 		}
+		plan = BuildStackedBFOperators(std::move(plan), backward_it->second, true);
 	}
 
 	return plan;

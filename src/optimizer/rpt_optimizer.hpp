@@ -56,7 +56,7 @@ public:
 			unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
 	GenerateStageModifications(const vector<JoinEdge> &mst_edges);
 
-	unique_ptr<LogicalOperator> BuildStackedBFOperators(LogicalOperator* table_op,
+	unique_ptr<LogicalOperator> BuildStackedBFOperators(unique_ptr<LogicalOperator> base_plan,
 							     const vector<BloomFilterOperation> &bf_ops,
 							     bool reverse_order = false);
 
