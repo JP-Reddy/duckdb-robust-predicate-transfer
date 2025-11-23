@@ -682,6 +682,11 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::PreOptimize(unique_ptr<Log
 }
 
 unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<LogicalOperator> plan) {
+	// step 1: extract join operators
+	vector<JoinEdge> edges = ExtractOperators(*plan);
+
+	// step 2: create transfer graph using LargestRoot algorithm
+	mst_edges = LargestRoot(edges);
 
 	// step 3: generate forward/backward pass using MST edges
 	const auto bf_ops = GenerateStageModifications(mst_edges);

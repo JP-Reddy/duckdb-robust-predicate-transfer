@@ -48,7 +48,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	OptimizerExtension optimizer;
 	// optimizer.optimize_function = PredicateTransferOptimizer::Optimize;
 	// optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
-	optimizer.pre_optimize_function = RPTOptimizerContextState::PreOptimize;
+	// optimizer.pre_optimize_function = RPTOptimizerContextState::PreOptimize;
 	optimizer.optimize_function = RPTOptimizerContextState::Optimize;
 	// optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
 	instance.config.optimizer_extensions.push_back(optimizer);
