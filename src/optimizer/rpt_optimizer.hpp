@@ -42,7 +42,7 @@ public:
 	vector<JoinEdge> LargestRoot(vector<JoinEdge> &edges);
 
 	// build rooted tree from MST edges with largest table as root
-	TreeNode* BuildRootedTree(vector<JoinEdge> &mst_edges);
+	TreeNode* BuildRootedTree(vector<JoinEdge> &mst_edges) const;
 
 	// void CreateForwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
 	// 														const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding> &larger_columns,

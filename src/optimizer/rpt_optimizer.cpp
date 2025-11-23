@@ -232,7 +232,7 @@ vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) 
 	return mst_edges;
 }
 
-TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges) {
+TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges) const {
 	// step 1: find largest table (root)
 	idx_t root_table_idx = 0;
 	idx_t max_cardinality = 0;
@@ -653,17 +653,17 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::ApplyStageModifications(un
 	// add the forward pass bf operators above the base table operator
 	auto forward_it = forward_bf_ops.find(original_op);
 	if (forward_it != forward_bf_ops.end()) {
-		printf("ApplyStage: Found %zu forward ops for operator %p\n", forward_it->second.size(), original_op);
+		// printf("ApplyStage: Found %zu forward ops for operator %p\n", forward_it->second.size(), original_op);
 		plan = BuildStackedBFOperators(std::move(plan), forward_it->second, false);
 	}
 
 	// add the backward pass bf operators above the forward pass bf operators
 	auto backward_it = backward_bf_ops.find(original_op);
 	if (backward_it != backward_bf_ops.end()) {
-		printf("ApplyStage: Found %zu backward ops for operator %p\n", backward_it->second.size(), original_op);
+		// printf("ApplyStage: Found %zu backward ops for operator %p\n", backward_it->second.size(), original_op);
 		for (size_t i = 0; i < backward_it->second.size(); i++) {
 			const auto &op = backward_it->second[i];
-			printf("  Backward op %zu: %s on table %llu\n", i, op.is_create ? "CREATE" : "USE", op.is_create ? op.build_table_idx : op.probe_table_idx);
+			// printf("  Backward op %zu: %s on table %llu\n", i, op.is_create ? "CREATE" : "USE", op.is_create ? op.build_table_idx : op.probe_table_idx);
 		}
 		plan = BuildStackedBFOperators(std::move(plan), backward_it->second, true);
 	}

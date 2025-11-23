@@ -58,8 +58,6 @@ shared_ptr<FilterPlan> BloomFilterOperationToFilterPlan(const BloomFilterOperati
 }
 
 PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
-	printf("LogicalUseBF::CreatePlan called - Build table: %llu, Probe table: %llu\n",
-		   bf_operation.build_table_idx, bf_operation.probe_table_idx);
 	if (!physical) {
 		auto &plan = generator.CreatePlan(*children[0]);
 		// TODO: Replace filter_plan with bf_operation everywhere.
@@ -74,7 +72,6 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 		}
 
 		use_bf.children.emplace_back(plan);
-		printf("  Created PhysicalUseBF successfully\n");
 		return use_bf;
 	}
 	printf("  Reusing existing physical operator\n");
