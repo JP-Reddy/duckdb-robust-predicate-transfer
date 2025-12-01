@@ -183,4 +183,21 @@ private:
 	vector<idx_t> bound_cols_built;
 };
 
+// builder for constructing bloom filter from hash values
+// it is used for parallel finalize with atomic bloom filter operations
+class BloomFilterBuilder {
+public:
+	BloomFilterBuilder() = default;
+
+	// initialize builder with target bf and columns to hash
+	void Begin(shared_ptr<BloomFilter> bf, const vector<idx_t> &bound_cols);
+
+	void PushNextBatch(int64_t num_rows, const uint64_t *hashes) const;
+
+	vector<idx_t> BuiltCols() const;
+private:
+	shared_ptr<BloomFilter> bloom_filter;
+	vector<idx_t> bound_cols;
+};
+
 } // namespace duckdb

@@ -68,4 +68,28 @@ void BloomFilter::Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built
 	// std::lock_guard<std::mutex> lock(insert_lock);
 	BloomFilterInsert(count, reinterpret_cast<uint64_t *>(hashes.GetData()), blocks);
 }
+
+// initialize builder with target bf and columns to hash
+void BloomFilterBuilder::Begin(shared_ptr<BloomFilter> bf, const vector<idx_t> &bound_cols) {
+	bloom_filter = bf;
+	this->bound_cols = bound_cols;
+}
+
+void BloomFilterBuilder::PushNextBatch(int64_t num_rows, const uint64_t *hashes) const {
+	// create temp chunk for hashing
+	DataChunk temp_chunk;
+	temp_chunk.Initialize(Allocator::DefaultAllocator(),{LogicalType::HASH});
+	temp_chunk.SetCardinality(num_rows);
+
+	// copy hashes to chunk
+	auto hash_data = FlatVector::GetData<uint64_t>(temp_chunk.data[0]);
+	memcpy(hash_data, hashes, num_rows * sizeof(hash_t));
+
+	bloom_filter->Insert(temp_chunk, bound_cols);
+}
+
+vector<idx_t> BloomFilterBuilder::BuiltCols() {
+	return bound_cols;
+}
+
 } // namespace duckdb
