@@ -11,7 +11,7 @@
 #include "duckdb/storage/buffer_manager.hpp"
 
 #include <cstdint>
-#include <mutex>
+// #include <mutex>
 
 #ifndef BF_RESTRICT
 #if defined(_MSC_VER)
@@ -49,8 +49,10 @@ public:
 	uint32_t num_sectors;
 	uint32_t num_sectors_log;
 
-	std::mutex insert_lock;
-	uint32_t *blocks;
+	// std::mutex insert_lock;
+	// uint32_t *blocks;
+
+	std::atomic<uint32_t> *blocks;
 
 private:
 	// key_lo |5:bit3|5:bit2|5:bit1|  13:block    |4:sector1 | bit layout (32:total)
@@ -75,24 +77,27 @@ private:
 		return block1 ^ (8 + (key_hi & 7));
 	}
 
-	inline void InsertOne(uint32_t key_lo, uint32_t key_hi, uint32_t *BF_RESTRICT bf) const {
+	inline void InsertOne(uint32_t key_lo, uint32_t key_hi, std::atomic<uint32_t> *BF_RESTRICT bf) const {
 		uint32_t sector1 = GetSector1(key_lo, key_hi);
 		uint32_t mask1 = GetMask1(key_lo);
 		uint32_t sector2 = GetSector2(key_hi, sector1);
 		uint32_t mask2 = GetMask2(key_hi);
-		bf[sector1] |= mask1;
-		bf[sector2] |= mask2;
+		// bf[sector1] |= mask1;
+		// bf[sector2] |= mask2;
+
+		bf[sector1].fetch_or(mask1, std::memory_order_relaxed);
+		bf[sector2].fetch_or(mask2, std::memory_order_relaxed);
 	}
-	inline bool LookupOne(uint32_t key_lo, uint32_t key_hi, const uint32_t *BF_RESTRICT bf) const {
+	inline bool LookupOne(uint32_t key_lo, uint32_t key_hi, const std::atomic<uint32_t> *BF_RESTRICT bf) const {
 		uint32_t sector1 = GetSector1(key_lo, key_hi);
 		uint32_t mask1 = GetMask1(key_lo);
 		uint32_t sector2 = GetSector2(key_hi, sector1);
 		uint32_t mask2 = GetMask2(key_hi);
-		return ((bf[sector1] & mask1) == mask1) & ((bf[sector2] & mask2) == mask2);
+		return ((bf[sector1].load(std::memory_order_relaxed) & mask1) == mask1) & ((bf[sector2].load(std::memory_order_relaxed) & mask2) == mask2);
 	}
 
 private:
-	int BloomFilterLookup(int num, const uint64_t *BF_RESTRICT key64, const uint32_t *BF_RESTRICT bf,
+	int BloomFilterLookup(int num, const uint64_t *BF_RESTRICT key64, const std::atomic<uint32_t> *BF_RESTRICT bf,
 	                      uint32_t *BF_RESTRICT out) const {
 		const uint32_t *BF_RESTRICT key = reinterpret_cast<const uint32_t * BF_RESTRICT>(key64);
 		for (int i = 0; i + SIMD_BATCH_SIZE <= num; i += SIMD_BATCH_SIZE) {
@@ -110,7 +115,7 @@ private:
 			}
 
 			for (int j = 0; j < SIMD_BATCH_SIZE; j++) {
-				out[i + j] = ((bf[block1[j]] & mask1[j]) == mask1[j]) & ((bf[block2[j]] & mask2[j]) == mask2[j]);
+				out[i + j] = ((bf[block1[j]].load(std::memory_order_relaxed) & mask1[j]) == mask1[j]) & ((bf[block2[j]].load(std::memory_order_relaxed) & mask2[j]) == mask2[j]);
 			}
 		}
 
@@ -121,7 +126,7 @@ private:
 		return num;
 	}
 
-	void BloomFilterInsert(int num, const uint64_t *BF_RESTRICT key64, uint32_t *BF_RESTRICT bf) const {
+	void BloomFilterInsert(int num, const uint64_t *BF_RESTRICT key64, std::atomic<uint32_t> *BF_RESTRICT bf) const {
 		const uint32_t *BF_RESTRICT key = reinterpret_cast<const uint32_t * BF_RESTRICT>(key64);
 		for (int i = 0; i + SIMD_BATCH_SIZE <= num; i += SIMD_BATCH_SIZE) {
 			uint32_t block1[SIMD_BATCH_SIZE], mask1[SIMD_BATCH_SIZE];
@@ -138,8 +143,10 @@ private:
 			}
 
 			for (int j = 0; j < SIMD_BATCH_SIZE; j++) {
-				bf[block1[j]] |= mask1[j];
-				bf[block2[j]] |= mask2[j];
+				// bf[block1[j]] |= mask1[j];
+				// bf[block2[j]] |= mask2[j];
+				bf[block1[j]].fetch_or(mask1[j], std::memory_order_relaxed);
+				bf[block2[j]].fetch_or(mask2[j], std::memory_order_relaxed);
 			}
 		}
 

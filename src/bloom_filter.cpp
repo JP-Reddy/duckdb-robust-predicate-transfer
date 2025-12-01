@@ -48,8 +48,11 @@ void BloomFilter::Initialize(ClientContext &context_p, uint32_t est_num_rows) {
 
 	buf_ = buffer_manager->GetBufferAllocator().Allocate(64 + num_sectors * sizeof(uint32_t));
 	// make sure blocks is a 64-byte aligned pointer, i.e., cache-line aligned
-	blocks = reinterpret_cast<uint32_t *>((64ULL + reinterpret_cast<uint64_t>(buf_.get())) & ~63ULL);
-	std::fill_n(blocks, num_sectors, 0);
+	blocks = reinterpret_cast<std::atomic<uint32_t> *>((64ULL + reinterpret_cast<uint64_t>(buf_.get())) & ~63ULL);
+	// std::fill_n(blocks, num_sectors, 0);
+	for (uint32_t i = 0; i < num_sectors; i++) {
+		blocks[i].store(0, std::memory_order_relaxed);
+	}
 }
 
 int BloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vector<idx_t> &bound_cols_applied) const {
@@ -62,7 +65,7 @@ int BloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vecto
 void BloomFilter::Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built) {
 	int count = static_cast<int>(chunk.size());
 	Vector hashes = HashColumns(chunk, bound_cols_built);
-	std::lock_guard<std::mutex> lock(insert_lock);
+	// std::lock_guard<std::mutex> lock(insert_lock);
 	BloomFilterInsert(count, reinterpret_cast<uint64_t *>(hashes.GetData()), blocks);
 }
 } // namespace duckdb
