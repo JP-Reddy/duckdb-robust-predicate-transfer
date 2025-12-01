@@ -4,6 +4,7 @@
 #include "bloom_filter.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
+#include "duckdb/parallel/meta_pipeline.hpp"
 
 namespace duckdb {
 
@@ -32,12 +33,21 @@ unique_ptr<GlobalOperatorState> PhysicalUseBF::GetGlobalOperatorState(ClientCont
     return make_uniq<PhysicalUseBFGlobalState>();
 }
 
+// void PhysicalUseBF::InitializeBloomFilters(PhysicalUseBFState &bf_state, ExecutionContext &context) const {
+//     if (related_create_bf && !bf_state.bloom_filters_initialized) {
+//         // get bloom filters from the related PhysicalCreateBF
+//         bf_state.bloom_filters = related_create_bf->GetBloomFilters();
+//         bf_state.bloom_filters_initialized = true;
+//     }
+// }
+
 void PhysicalUseBF::InitializeBloomFilters(PhysicalUseBFState &bf_state, ExecutionContext &context) const {
-    if (related_create_bf && !bf_state.bloom_filters_initialized) {
-        // get bloom filters from the related PhysicalCreateBF
-        bf_state.bloom_filters = related_create_bf->GetBloomFilters();
-        bf_state.bloom_filters_initialized = true;
-    }
+	if (!bf_state.bloom_filters_initialized && !related_create_bf_vec.empty()) {
+		// get bloom filters from the first related PhysicalCreateBF
+		// (or merge from all of them if you have multiple)
+		bf_state.bloom_filters = related_create_bf_vec[0]->GetBloomFilters();
+		bf_state.bloom_filters_initialized = true;
+	}
 }
 
 bool PhysicalUseBF::FilterDataChunk(DataChunk &chunk, const vector<shared_ptr<BloomFilter>> &bloom_filters,
@@ -140,6 +150,21 @@ OperatorResultType PhysicalUseBF::Execute(ExecutionContext &context, DataChunk &
     }
     
     return child_result;
+}
+
+void PhysicalUseBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) {
+	op_state.reset();
+
+	auto &state = meta_pipeline.GetState();
+	state.AddPipelineOperator(current, *this);
+
+	// for each related CREATE_BF, ensure its pipeline is a dependency
+	for (auto *create_bf : related_create_bf_vec) {
+		create_bf->BuildPipelinesFromRelated(current, meta_pipeline);
+	}
+
+	// continue building child pipelines
+	children[0].get().BuildPipelines(current, meta_pipeline);
 }
 
 } // namespace duckdb

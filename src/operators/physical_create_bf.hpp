@@ -4,20 +4,10 @@
 #include "dag.hpp"
 #include "bloom_filter.hpp"
 #include "../optimizer/graph_manager.hpp"
+#include "duckdb/common/types/column/column_data_collection.hpp"
+#include <duckdb/common/types/column/column_data_scan_states.hpp>
 namespace duckdb {
 
-class PhysicalCreateBFLocalSinkState : public LocalSinkState {
-public:
-	PhysicalCreateBFLocalSinkState() = default;
-};
-
-class PhysicalCreateBFGlobalSinkState : public GlobalSinkState {
-public:
-	PhysicalCreateBFGlobalSinkState() = default;
-
-	vector<shared_ptr<BloomFilter>> bloom_filters;
-	mutex bf_lock;
-};
 
 class PhysicalCreateBF : public PhysicalOperator {
 public:
@@ -41,9 +31,25 @@ public:
 	SinkFinalizeType Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
 	                          OperatorSinkFinalizeInput &input) const override;
 
+
 	bool IsSink() const override {
 		return true;
 	}
+
+	// source interface
+	unique_ptr<GlobalSourceState> GetGlobalSourceState(ClientContext &context) const override;
+	unique_ptr<LocalSourceState> GetLocalSourceState(ExecutionContext &context,
+							  GlobalSourceState &gstate) const override;
+	SourceResultType GetData(ExecutionContext &context, DataChunk &chunk,
+				OperatorSourceInput &input) const override;
+
+	bool IsSource() const override {
+		return true;
+	}
+
+	void BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) override;
+	void BuildPipelinesFromRelated(Pipeline &current, MetaPipeline &meta_pipeline);
+
 public:
 	// vector<shared_ptr<FilterPlan>> filter_plans;
 	shared_ptr<BloomFilterOperation> bf_operation;
@@ -52,8 +58,49 @@ public:
 	// maps the column indices to resolved chunk column positions
 	vector<idx_t> bound_column_indices;
 
+	// pipeline reference
+	shared_ptr<Pipeline> this_pipeline;
+
 	// access to created bloom filters for PhysicalUseBF operators
 	vector<shared_ptr<BloomFilter>> GetBloomFilters() const;
+};
+
+class CreateBFLocalSinkState : public LocalSinkState {
+public:
+	CreateBFLocalSinkState() = default;
+	CreateBFLocalSinkState(ClientContext &context, const PhysicalCreateBF &op);
+
+	ClientContext &client_context;
+	unique_ptr<ColumnDataCollection> local_data;
+};
+
+class CreateBFGlobalSinkState : public GlobalSinkState {
+public:
+	CreateBFGlobalSinkState() = default;
+	CreateBFGlobalSinkState(ClientContext &context, const PhysicalCreateBF &op);
+	void scheduleFinalize(Pipeline &pipeline, Event &event);
+
+	mutex bf_lock;
+	const PhysicalCreateBF &op;
+	vector<shared_ptr<BloomFilterBuilder>> bf_builders;
+
+
+	// store data for sink phase
+	unique_ptr<ColumnDataCollection> total_data;
+	vector<unique_ptr<ColumnDataCollection>> local_data_collections;
+};
+
+class PhysicalCreateBFLocalSourceState : public LocalSourceState {
+public:
+	PhysicalCreateBFLocalSourceState() = default;
+};
+
+class PhysicalCreateBFGlobalSourceState : public GlobalSourceState {
+public:
+	PhysicalCreateBFGlobalSourceState() = default;
+	vector<shared_ptr<BloomFilter>> bloom_filters;
+	mutex bf_lock;
+	ColumnDataScanState scan_state;
 };
 
 } // namespace duckdb

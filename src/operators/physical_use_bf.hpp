@@ -45,10 +45,15 @@ public:
 	OperatorResultType Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
 	                          GlobalOperatorState &gstate, OperatorState &state) const override;
 
+	void BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) override;
+
 public:
+
 	shared_ptr<FilterPlan> filter_plan;
 	bool is_probing_side;
-	
+
+	vector<PhysicalCreateBF*> related_create_bf_vec;
+
 	// Reference to the corresponding PhysicalCreateBF operator
 	mutable PhysicalCreateBF *related_create_bf = nullptr;
 	
