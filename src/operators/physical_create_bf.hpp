@@ -58,6 +58,7 @@ public:
 	// maps the column indices to resolved chunk column positions
 	vector<idx_t> bound_column_indices;
 
+	vector<shared_ptr<BloomFilter>> bloom_filters;
 	// pipeline reference
 	shared_ptr<Pipeline> this_pipeline;
 
@@ -67,7 +68,6 @@ public:
 
 class CreateBFLocalSinkState : public LocalSinkState {
 public:
-	CreateBFLocalSinkState() = default;
 	CreateBFLocalSinkState(ClientContext &context, const PhysicalCreateBF &op);
 
 	ClientContext &client_context;
@@ -76,31 +76,43 @@ public:
 
 class CreateBFGlobalSinkState : public GlobalSinkState {
 public:
-	CreateBFGlobalSinkState() = default;
 	CreateBFGlobalSinkState(ClientContext &context, const PhysicalCreateBF &op);
-	void scheduleFinalize(Pipeline &pipeline, Event &event);
+	void ScheduleFinalize(Pipeline &pipeline, Event &event);
 
-	mutex bf_lock;
 	const PhysicalCreateBF &op;
+	mutex glock;
+	mutex bf_lock;
 	vector<shared_ptr<BloomFilterBuilder>> bf_builders;
-
 
 	// store data for sink phase
 	unique_ptr<ColumnDataCollection> total_data;
 	vector<unique_ptr<ColumnDataCollection>> local_data_collections;
 };
 
-class PhysicalCreateBFLocalSourceState : public LocalSourceState {
+class CreateBFLocalSourceState : public LocalSourceState {
 public:
-	PhysicalCreateBFLocalSourceState() = default;
+	CreateBFLocalSourceState() = default;
+
+public:
+	idx_t local_current_chunk_id;
+	idx_t local_partition_id;
+	idx_t chunk_from;
+	idx_t chunk_to;
+	bool initial;
 };
 
-class PhysicalCreateBFGlobalSourceState : public GlobalSourceState {
+class CreateBFGlobalSourceState : public GlobalSourceState {
 public:
-	PhysicalCreateBFGlobalSourceState() = default;
+	CreateBFGlobalSourceState(ClientContext &context, const PhysicalCreateBF &op);
+
+	idx_t MaxThreads() override;
+
+	ClientContext &context;
+	ColumnDataScanState scan_state;
+	vector<pair<idx_t, idx_t>> chunks_todo;
+	std::atomic<idx_t> partition_id;
 	vector<shared_ptr<BloomFilter>> bloom_filters;
 	mutex bf_lock;
-	ColumnDataScanState scan_state;
 };
 
 } // namespace duckdb
