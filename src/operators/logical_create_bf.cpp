@@ -6,6 +6,8 @@
 #include "duckdb/planner/logical_operator.hpp"
 #include "physical_create_bf.hpp"
 #include "dag.hpp"
+#include "logical_use_bf.hpp"
+#include "physical_use_bf.hpp"
 
 #include <utility>
 
@@ -94,6 +96,20 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 			physical_op.children.emplace_back(child_physical);
 		}
 		physical = static_cast<PhysicalCreateBF*>(&physical_op);
+
+		// link back to related USE_BF operators
+		// the links are used to create pipeline dependencies
+		for (const LogicalUseBF *use_bf : related_use_bf) {
+			if (use_bf->physical) {
+				use_bf->physical->related_create_bf = physical;
+				use_bf->physical->related_create_bf_vec.push_back(physical);
+				// string probe_table = "table_" + std::to_string(use_bf->bf_operation.probe_table_idx);
+				// string build_table = "table_" + std::to_string(bf_operation.build_table_idx);
+				// Printer::Print(StringUtil::Format(
+				// 	"[LOGICAL CREATE] linked back to USE_BF (probe=%s) from CREATE_BF (build=%s)",
+				// 	probe_table.c_str(), build_table.c_str()));
+			}
+		}
 		return physical_op;
 	}
 	return *physical;

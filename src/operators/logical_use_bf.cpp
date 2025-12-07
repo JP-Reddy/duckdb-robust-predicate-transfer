@@ -74,9 +74,16 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 			resolved_indices);
 		physical = static_cast<PhysicalUseBF*>(&physical_op);
 
+		if (related_create_bf) {
+			string probe_table = "table_" + std::to_string(bf_operation.probe_table_idx);
+			Printer::Print(StringUtil::Format("[LOGICAL USE] probe table - %s Related_create_bf exists", probe_table.c_str()));
+		}
 		// set up reference to related PhysicalCreateBF if available
 		if (related_create_bf && related_create_bf->physical) {
+			string probe_table = "table_" + std::to_string(bf_operation.probe_table_idx);
+			Printer::Print(StringUtil::Format("[LOGICAL USE] probe table - %s Related_create_bf  physical exists", probe_table.c_str()));
 			physical->related_create_bf = related_create_bf->physical;
+			physical->related_create_bf_vec.push_back(related_create_bf->physical);
 		}
 
 		physical_op.children.emplace_back(plan);

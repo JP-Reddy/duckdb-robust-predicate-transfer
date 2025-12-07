@@ -14,6 +14,7 @@
 namespace duckdb {
 class DatabaseInstance;
 class PhysicalCreateBF;
+class LogicalUseBF;
 
 class LogicalCreateBF : public LogicalExtensionOperator {
 public:
@@ -28,6 +29,7 @@ public:
 	BloomFilterOperation bf_operation;
 	PhysicalCreateBF *physical = nullptr;
 
+	vector<LogicalUseBF*> related_use_bf;
 	vector<shared_ptr<DynamicTableFilterSet>> min_max_to_create;
 	vector<vector<ColumnBinding>> min_max_applied_cols;
 	string message;
@@ -45,7 +47,5 @@ public:
 protected:
 	void ResolveTypes() override;
 };
-
-// void RegisterLogicalCreateBFOperatorExtension(DatabaseInstance &instance);
 
 } // namespace duckdb

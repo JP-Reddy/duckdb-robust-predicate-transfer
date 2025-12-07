@@ -84,7 +84,8 @@ void BloomFilterBuilder::PushNextBatch(int64_t num_rows, const uint64_t *hashes)
 	auto hash_data = FlatVector::GetData<uint64_t>(temp_chunk.data[0]);
 	memcpy(hash_data, hashes, num_rows * sizeof(hash_t));
 
-	bloom_filter->Insert(temp_chunk, bound_cols);
+	vector<idx_t> hash_col = {0};
+	bloom_filter->Insert(temp_chunk, hash_col);
 }
 
 vector<idx_t> BloomFilterBuilder::BuiltCols() const {

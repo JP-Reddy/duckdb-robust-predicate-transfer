@@ -510,80 +510,6 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
 }
 
-// std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
-// 			unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
-// RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
-//
-// 	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> forward_bf_ops;
-// 	unordered_map<LogicalOperator*, vector<BloomFilterOperation>> backward_bf_ops;
-//
-// 	for (const JoinEdge &mst_edge: mst_edges) {
-// 		// for each edge, create a bf operation
-// 		// rule: CREATE_BF on a smaller table, USE_BF on a larger table
-//
-// 		const idx_t left_cardinality = table_mgr.table_lookup[mst_edge.table_a].estimated_cardinality;
-// 		const idx_t right_cardinality = table_mgr.table_lookup[mst_edge.table_b].estimated_cardinality;
-//
-// 		LogicalOperator* smaller_table_op;
-// 		LogicalOperator* larger_table_op;
-// 		vector<ColumnBinding> smaller_columns, larger_columns;
-//
-// 		if (left_cardinality <= right_cardinality) {
-// 			smaller_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
-// 			larger_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
-// 			smaller_columns = mst_edge.join_columns_a;
-// 			larger_columns = mst_edge.join_columns_b;
-// 		}
-// 		else {
-// 			smaller_table_op = table_mgr.table_lookup[mst_edge.table_b].table_op;
-// 			larger_table_op = table_mgr.table_lookup[mst_edge.table_a].table_op;
-// 			smaller_columns = mst_edge.join_columns_b;
-// 			larger_columns = mst_edge.join_columns_a;
-// 		}
-//
-// 		// forward pass: smaller → larger
-// 		// CREATE_BF on smaller table
-// 		BloomFilterOperation forward_create_bf;
-// 		forward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-// 		forward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-// 		forward_create_bf.build_columns = smaller_columns;
-// 		forward_create_bf.probe_columns = larger_columns;
-// 		forward_create_bf.is_create = true;
-//
-// 		// USE_BF on larger table
-// 		BloomFilterOperation forward_use_bf;
-// 		forward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-// 		forward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-// 		forward_use_bf.build_columns = smaller_columns;
-// 		forward_use_bf.probe_columns = larger_columns;
-// 		forward_use_bf.is_create = false;
-//
-// 		forward_bf_ops[smaller_table_op].push_back(forward_create_bf);
-// 		forward_bf_ops[larger_table_op].push_back(forward_use_bf);
-//
-//
-// 		// backward pass: larger → smaller
-// 		// CREATE_BF operation for larger table
-// 		BloomFilterOperation backward_create_bf;
-// 		backward_create_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-// 		backward_create_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-// 		backward_create_bf.build_columns = larger_columns;
-// 		backward_create_bf.probe_columns = smaller_columns;
-// 		backward_create_bf.is_create = true;
-//
-// 		// USE_BF operation for smaller table
-// 		BloomFilterOperation backward_use_bf;
-// 		backward_use_bf.build_table_idx = table_mgr.GetScalarTableIndex(larger_table_op);
-// 		backward_use_bf.probe_table_idx = table_mgr.GetScalarTableIndex(smaller_table_op);
-// 		backward_use_bf.build_columns = larger_columns;
-// 		backward_use_bf.probe_columns = smaller_columns;
-// 		backward_use_bf.is_create = false;
-//
-// 		backward_bf_ops[larger_table_op].push_back(backward_create_bf);
-// 		backward_bf_ops[smaller_table_op].push_back(backward_use_bf);
-// 	}
-// 	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
-// }
 
 unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator> base_plan,
 																			   const vector<BloomFilterOperation> &bf_ops,
@@ -598,7 +524,7 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(un
 	unique_ptr<LogicalOperator> current = std::move(base_plan);
 
 	if (reverse_order) {
-		// backward pass: normal iteration (ops already in correct order in vector)
+		// backward pass
 		int iter = 0;
 		for (const auto &bf_op : bf_ops) {
 			unique_ptr<LogicalOperator> new_op;
@@ -671,6 +597,105 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::ApplyStageModifications(un
 	return plan;
 }
 
+void RPTOptimizerContextState::LinkUseBFToCreateBF(LogicalOperator *plan) {
+	if (!plan) {
+		return;
+	}
+
+	// helper struct to uniquely identify a CREATE_BF
+	struct CreateBFKey {
+		idx_t build_table_idx;
+		vector<ColumnBinding> build_columns;
+
+		bool operator==(const CreateBFKey &other) const {
+			if (build_table_idx != other.build_table_idx) {
+				return false;
+			}
+			if (build_columns.size() != other.build_columns.size()) {
+				return false;
+			}
+			for (size_t i = 0; i < build_columns.size(); i++) {
+				if (build_columns[i].table_index != other.build_columns[i].table_index ||
+					build_columns[i].column_index != other.build_columns[i].column_index) {
+					return false;
+				}
+			}
+			return true;
+		}
+	};
+
+	struct CreateBFKeyHash {
+		size_t operator()(const CreateBFKey &key) const {
+			size_t hash = std::hash<idx_t>()(key.build_table_idx);
+			for (const auto &col : key.build_columns) {
+				hash ^= (std::hash<idx_t>()(col.table_index) << 1);
+				hash ^= (std::hash<idx_t>()(col.column_index) << 2);
+			}
+			return hash;
+		}
+	};
+
+	// pass 1: collect all CREATE_BF operators
+	unordered_map<CreateBFKey, LogicalCreateBF*, CreateBFKeyHash> create_bf_map;
+	vector<LogicalOperator*> queue;
+	queue.push_back(plan);
+
+	while (!queue.empty()) {
+		LogicalOperator *current = queue.back();
+		queue.pop_back();
+
+		if (current->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
+			auto *create_bf = dynamic_cast<LogicalCreateBF*>(current);
+			if (create_bf) {
+				CreateBFKey key;
+				key.build_table_idx = create_bf->bf_operation.build_table_idx;
+				key.build_columns = create_bf->bf_operation.build_columns;
+				create_bf_map[key] = create_bf;
+
+				printf("[LINK] Found CREATE_BF for table_%llu with %zu columns\n",
+					   key.build_table_idx, key.build_columns.size());
+			}
+		}
+
+		for (auto &child : current->children) {
+			queue.push_back(child.get());
+		}
+	}
+
+	// pass 2: link all USE_BF operators to their corresponding CREATE_BF
+	queue.clear();
+	queue.push_back(plan);
+
+	while (!queue.empty()) {
+		LogicalOperator *current = queue.back();
+		queue.pop_back();
+
+		if (current->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
+			auto *use_bf = dynamic_cast<LogicalUseBF*>(current);
+			if (use_bf) {
+				CreateBFKey key;
+				key.build_table_idx = use_bf->bf_operation.build_table_idx;
+				key.build_columns = use_bf->bf_operation.build_columns;
+
+				auto it = create_bf_map.find(key);
+				if (it != create_bf_map.end()) {
+					use_bf->related_create_bf = it->second;
+					it->second->related_use_bf.push_back(use_bf);
+					printf("[LINK] Linked USE_BF (probe=table_%llu) to CREATE_BF (build=table_%llu)\n",
+						   use_bf->bf_operation.probe_table_idx, use_bf->bf_operation.build_table_idx);
+				} else {
+					printf("[LINK] WARNING: No matching CREATE_BF found for USE_BF (probe=table_%llu, build=table_%llu)\n",
+						   use_bf->bf_operation.probe_table_idx, use_bf->bf_operation.build_table_idx);
+				}
+			}
+		}
+
+		for (auto &child : current->children) {
+			queue.push_back(child.get());
+		}
+	}
+}
+
 unique_ptr<LogicalOperator> RPTOptimizerContextState::PreOptimize(unique_ptr<LogicalOperator> plan) {
 	// step 1: extract join operators
 	vector<JoinEdge> edges = ExtractOperators(*plan);
@@ -695,6 +720,9 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 
 	// step 4: insert create_bf/use_bf operators into the plan
 	plan = ApplyStageModifications(std::move(plan), forward_bf_ops, backward_bf_ops);
+
+	// step 5: link USE_BF operators to their corresponding CREATE_BF operators
+	LinkUseBFToCreateBF(plan.get());
 
 	// combine all bloom filter operations for debug (preserving order)
 	vector<BloomFilterOperation> all_bf_operations;

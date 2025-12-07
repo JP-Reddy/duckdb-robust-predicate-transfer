@@ -64,6 +64,10 @@ public:
 	unique_ptr<LogicalOperator> ApplyStageModifications(unique_ptr<LogicalOperator> plan,
 							   const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &forward_bf_ops,
 							   const unordered_map<LogicalOperator*, vector<BloomFilterOperation>> &backward_bf_ops);
+
+	// helper to link USE_BF operators to their corresponding CREATE_BF operators
+	void LinkUseBFToCreateBF(LogicalOperator *plan);
+
 	// debug functions
 	void DebugPrintGraph(const vector<JoinEdge> &edges) const;
 	void DebugPrintMST(const vector<JoinEdge> &mst_edges, const vector<BloomFilterOperation> &bf_operations);

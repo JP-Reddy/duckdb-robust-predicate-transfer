@@ -107,13 +107,40 @@ OperatorResultType PhysicalUseBF::Execute(ExecutionContext &context, DataChunk &
 void PhysicalUseBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) {
 	op_state.reset();
 
+	string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
+	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) BuildPipelines called", probe_table.c_str()));
+
 	auto &state = meta_pipeline.GetState();
 	state.AddPipelineOperator(current, *this);
+	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) added to current pipeline as operator", probe_table.c_str()));
 
 	// add dependencies on all related CREATE_BF operators
-	for (auto *create_bf : related_create_bf_vec) {
+	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) has %zu related CREATE_BF operators",
+		probe_table.c_str(), related_create_bf_vec.size()));
+
+	for (size_t i = 0; i < related_create_bf_vec.size(); i++) {
+		auto *create_bf = related_create_bf_vec[i];
+		string build_table = create_bf->bf_operation ?
+			"table_" + std::to_string(create_bf->bf_operation->build_table_idx) : "unknown";
+		Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) adding dependency #%zu on CREATE_BF (build=%s)",
+			probe_table.c_str(), i, build_table.c_str()));
 		create_bf->BuildPipelinesFromRelated(current, meta_pipeline);
+
+		Printer::Print(StringUtil::Format("[PIPELINE DEBUG] USE_BF (probe=%s) After adding dependency #%zu:", probe_table.c_str(), i));
+		current.PrintDependencies();
 	}
+
+	Printer::Print(StringUtil::Format("[PIPELINE DEBUG] USE_BF (probe=%s) Final pipeline state:", probe_table.c_str()));
+	try {
+		current.Print();
+		Printer::Print("Pipeline Dependencies");
+		current.PrintDependencies();
+	} catch (...) {
+		Printer::Print("  (Pipeline not yet fully initialized)");
+	}
+	Printer::Print("");
+
+	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) building child operator pipelines", probe_table.c_str()));
 
 	// continue building child pipelines
 	children[0].get().BuildPipelines(current, meta_pipeline);
