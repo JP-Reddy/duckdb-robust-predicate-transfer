@@ -8,15 +8,16 @@
 namespace duckdb {
 class PhysicalCreateBF;
 
-class PhysicalUseBFState : public OperatorState {
+class PhysicalUseBFState : public CachingOperatorState {
 public:
-	PhysicalUseBFState() : bloom_filters_initialized(false) {}
+	PhysicalUseBFState() : bloom_filters_initialized(false), tested_hardcoded(false) {}
 
 	vector<shared_ptr<BloomFilter>> bloom_filters;
 	bool bloom_filters_initialized;
+	bool tested_hardcoded;
 };
 
-class PhysicalUseBF : public PhysicalOperator {
+class PhysicalUseBF : public CachingPhysicalOperator {
 public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
@@ -33,11 +34,16 @@ public:
 	// state management
 	unique_ptr<OperatorState> GetOperatorState(ExecutionContext &context) const override;
 
-	// operator interface
-	OperatorResultType Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
-	                          GlobalOperatorState &gstate, OperatorState &state) const override;
+	bool ParallelOperator() const override {
+		return true;
+	}
 
 	void BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) override;
+
+protected:
+	// operator interface - using ExecuteInternal for CachingPhysicalOperator
+	OperatorResultType ExecuteInternal(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
+	                                   GlobalOperatorState &gstate, OperatorState &state) const override;
 
 public:
 	shared_ptr<BloomFilterOperation> bf_operation;

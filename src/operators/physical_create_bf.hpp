@@ -58,12 +58,14 @@ public:
 	// maps the column indices to resolved chunk column positions
 	vector<idx_t> bound_column_indices;
 
-	vector<shared_ptr<BloomFilter>> bloom_filters;
+	// column-keyed bloom filter map: ColumnBinding -> BloomFilter
+	unordered_map<ColumnBinding, shared_ptr<BloomFilter>, ColumnBindingHash, ColumnBindingEqual> bloom_filter_map;
+
 	// pipeline reference
 	shared_ptr<Pipeline> this_pipeline;
 
-	// access to created bloom filters for PhysicalUseBF operators
-	vector<shared_ptr<BloomFilter>> GetBloomFilters() const;
+	// lookup bloom filter by the column it was built on
+	shared_ptr<BloomFilter> GetBloomFilter(const ColumnBinding &col) const;
 };
 
 class CreateBFLocalSinkState : public LocalSinkState {

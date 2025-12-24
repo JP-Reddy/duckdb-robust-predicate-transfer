@@ -39,6 +39,7 @@ public:
 	//vector<JoinEdge> ExtractOperators(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
 	vector<JoinEdge> ExtractOperators(LogicalOperator &plan);
 	void ExtractOperatorsRecursive(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
+	map<table_id, TableInfo> get_value();
 	vector<JoinEdge> CreateJoinEdges(vector<LogicalOperator*> &join_ops);
 	vector<JoinEdge> LargestRoot(vector<JoinEdge> &edges);
 
@@ -67,6 +68,9 @@ public:
 
 	// helper to link USE_BF operators to their corresponding CREATE_BF operators
 	void LinkUseBFToCreateBF(LogicalOperator *plan);
+
+	// resolve column binding through rename chain to get base table binding
+	ColumnBinding ResolveColumnBinding(const ColumnBinding &binding) const;
 
 	// debug functions
 	void DebugPrintGraph(const vector<JoinEdge> &edges) const;

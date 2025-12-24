@@ -5,6 +5,7 @@
 #include "duckdb/parallel/pipeline.hpp"
 #include "duckdb/parallel/base_pipeline_event.hpp"
 #include <iostream>
+#include <unordered_set>
 #include <duckdb/parallel/meta_pipeline.hpp>
 #include <duckdb/parallel/thread_context.hpp>
 
@@ -14,9 +15,10 @@ PhysicalCreateBF::PhysicalCreateBF(const shared_ptr<BloomFilterOperation> bf_ope
                                    idx_t estimated_cardinality, vector<idx_t> bound_column_indices)
     : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       bf_operation(bf_operation), is_probing_side(false), bound_column_indices(std::move(bound_column_indices)) {
-	bloom_filters.reserve(bf_operation->build_columns.size());
+	// create bloom filter for each build column, keyed by ColumnBinding
 	for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
-		bloom_filters.push_back(make_shared_ptr<BloomFilter>());
+		const auto &col = bf_operation->build_columns[i];
+		bloom_filter_map[col] = make_shared_ptr<BloomFilter>();
 	}
 }
 
@@ -48,6 +50,10 @@ CreateBFGlobalSinkState::CreateBFGlobalSinkState(ClientContext &context, const P
 
 SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	CreateBFLocalSinkState &local_state = input.local_state.Cast<CreateBFLocalSinkState>();
+
+	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
+	printf("[SINK] CREATE_BF (build=%s, this=%p): Received chunk with %llu rows\n", build_table.c_str(), (void*)this, chunk.size());
+
 	local_state.local_data->Append(chunk);
 	return SinkResultType::NEED_MORE_INPUT;
 }
@@ -83,17 +89,7 @@ public:
 			sink.total_data->InitializeScanChunk(chunk);
 			sink.total_data->FetchChunk(i, chunk);
 			for (shared_ptr<BloomFilterBuilder> &bf_builder : sink.bf_builders) {
-				vector<idx_t> cols = bf_builder->BuiltCols();
-				Vector hashes(LogicalType::HASH);
-				VectorOperations::Hash(chunk.data[cols[0]], hashes, chunk.size());
-				for (int i = 1; i < cols.size(); i++) {
-					VectorOperations::CombineHash(hashes, chunk.data[cols[i]], chunk.size());
-				}
-				if (hashes.GetVectorType() == VectorType::CONSTANT_VECTOR) {
-					hashes.Flatten(chunk.size());
-				}
-				bf_builder->PushNextBatch(chunk.size(), reinterpret_cast<hash_t *>(hashes.GetData()));
-
+				bf_builder->PushNextBatch(chunk);
 			}
 		}
 
@@ -151,6 +147,21 @@ public:
 		SetTasks(std::move(finalize_tasks));
 	}
 
+	void FinishEvent() override {
+		// mark all bloom filters as finalized after parallel building completes
+		string build_table = sink.op.bf_operation ? "table_" + std::to_string(sink.op.bf_operation->build_table_idx) : "unknown";
+		printf("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters\n",
+			build_table.c_str(), sink.op.bloom_filter_map.size());
+
+		for (auto &[col, bf] : sink.op.bloom_filter_map) {
+			if (bf) {
+				bf->finalized_ = true;
+				printf("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) marked as finalized\n",
+					build_table.c_str(), col.table_index, col.column_index);
+			}
+		}
+	}
+
 	static constexpr const idx_t PARALLEL_CONSTRUCT_THRESHOLD = 1048576;
 };
 
@@ -173,25 +184,34 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 		gsink.total_data->Combine(*local_data);
 	}
 
+	// print total data size
+	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
+	printf("[FINALIZE] CREATE_BF (build=%s, this=%p): total_data contains %llu rows\n",
+		   build_table.c_str(), (void*)this, gsink.total_data->Count());
+	printf("[FINALIZE] total_data: \n");
+	// gsink.total_data->Print();
+
 	gsink.local_data_collections.clear();
 
-	// initialize bloom filters
+	// 2. initialize bloom filters (iterate over map)
 	lock_guard<mutex> lock(gsink.bf_lock);
-	for (auto &bf : bloom_filters) {
+	for (auto &[col, bf] : bloom_filter_map) {
 		if (bf) {
 			bf->Initialize(context, estimated_cardinality);
-			// not finalized yet - will be after building
 			bf->finalized_ = false;
 		}
 	}
 
 	// 3. create builders for each bloom filter
-	for (size_t i = 0; i < gsink.op.bloom_filters.size(); i++) {
-		auto builder = make_shared_ptr<BloomFilterBuilder>();
-		// Each bloom filter is built on a single column
-		vector<idx_t> bound_cols = {gsink.op.bound_column_indices[i]};
-		builder->Begin(gsink.op.bloom_filters[i], bound_cols);
-		gsink.bf_builders.emplace_back(builder);
+	for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
+		const auto &col = bf_operation->build_columns[i];
+		auto it = bloom_filter_map.find(col);
+		if (it != bloom_filter_map.end()) {
+			auto builder = make_shared_ptr<BloomFilterBuilder>();
+			vector<idx_t> bound_cols = {bound_column_indices[i]};
+			builder->Begin(it->second, bound_cols);
+			gsink.bf_builders.emplace_back(builder);
+		}
 	}
 
 	// 4. schedule parallel finalization
@@ -211,8 +231,12 @@ unique_ptr<LocalSinkState> PhysicalCreateBF::GetLocalSinkState(ExecutionContext 
 	return make_uniq<CreateBFLocalSinkState>(context.client, *this);
 }
 
-vector<shared_ptr<BloomFilter>> PhysicalCreateBF::GetBloomFilters() const {
-	return bloom_filters;
+shared_ptr<BloomFilter> PhysicalCreateBF::GetBloomFilter(const ColumnBinding &col) const {
+	auto it = bloom_filter_map.find(col);
+	if (it != bloom_filter_map.end()) {
+		return it->second;
+	}
+	return nullptr;
 }
 
 //===--------------------------------------------------------------------===//
@@ -318,17 +342,9 @@ void PhysicalCreateBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipe
 	sink_state.reset();
 
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) BuildPipelines called", build_table.c_str()));
-
-	// // DEBUG: Print current pipeline state BEFORE modifications (safe version)
-	// Printer::Print(StringUtil::Format("[PIPELINE DEBUG] CREATE_BF (build=%s) Current pipeline BEFORE:", build_table.c_str()));
-	// try {
-	// 	current.Print();
-	// 	Printer::Print("Pipeline Dependencies"); // blank line for readability
-	// 	current.PrintDependencies();
-	// } catch (...) {
-	// 	Printer::Print("  (Pipeline not yet fully initialized)");
-	// }
+	char ptr_str[32];
+	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
+	Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
 
 	auto &state = meta_pipeline.GetState();
 
@@ -339,52 +355,40 @@ void PhysicalCreateBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipe
 		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) creating NEW child pipeline for build-side", build_table.c_str()));
 		auto &child_meta_pipeline = meta_pipeline.CreateChildMetaPipeline(current, *this);
 		this_pipeline = child_meta_pipeline.GetBasePipeline();
+		// CreateChildMetaPipeline() automatically registers the child pipeline as a dependency
 		child_meta_pipeline.Build(children[0].get());
 		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) child pipeline created", build_table.c_str()));
-
-		Printer::Print(StringUtil::Format("[PIPELINE DEBUG] CREATE_BF (build=%s) Newly created child pipeline:", build_table.c_str()));
-		try {
-			this_pipeline->Print();
-		} catch (...) {
-			Printer::Print("  (Pipeline not yet fully initialized)");
-		}
-		this_pipeline->PrintDependencies();
 	} else {
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) REUSING existing pipeline, adding as dependency", build_table.c_str()));
+		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) adding existing child pipeline as dependency", build_table.c_str()));
 		current.AddDependency(this_pipeline);
-
-		Printer::Print(StringUtil::Format("[PIPELINE DEBUG] CREATE_BF (build=%s) Added dependency, current pipeline now:", build_table.c_str()));
-		current.PrintDependencies();
 	}
 
-	Printer::Print(StringUtil::Format("[PIPELINE DEBUG] CREATE_BF (build=%s) Current pipeline AFTER:", build_table.c_str()));
-	try {
-		current.Print();
-		Printer::Print("Pipeline Dependencies"); // blank line for readability
-		current.PrintDependencies();
-	} catch (...) {
-		Printer::Print("  (Pipeline not yet fully initialized)");
-	}
-	Printer::Print("");
 }
 
 void PhysicalCreateBF::BuildPipelinesFromRelated(Pipeline &current,
 												   MetaPipeline &meta_pipeline) {
 	op_state.reset();
 
+	auto &state = meta_pipeline.GetState();
+	D_ASSERT(children.size() == 1);
+
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) BuildPipelinesFromRelated - USE_BF needs this filter", build_table.c_str()));
+	char ptr_str[32];
+	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
+	Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelinesFromRelated - USE_BF needs this filter", build_table.c_str(), ptr_str));
 
 	if (this_pipeline == nullptr) {
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) creating NEW child pipeline for dependency", build_table.c_str()));
+		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) creating NEW child pipeline from BuildPipelinesFromRelated", build_table.c_str(), ptr_str));
 		auto &child_meta_pipeline = meta_pipeline.CreateChildMetaPipeline(current, *this);
 		this_pipeline = child_meta_pipeline.GetBasePipeline();
 		child_meta_pipeline.Build(children[0].get());
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) child pipeline created for dependency", build_table.c_str()));
+		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) child pipeline created and dependency added automatically", build_table.c_str(), ptr_str));
 	} else {
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) adding existing pipeline as DEPENDENCY to current pipeline", build_table.c_str()));
+		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) adding existing pipeline as dependency", build_table.c_str(), ptr_str));
 		current.AddDependency(this_pipeline);
 	}
+
+	this_pipeline->Print();
 }
 
 } // namespace duckdb

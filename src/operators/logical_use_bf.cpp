@@ -54,12 +54,23 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 
 		// step 2: resolve/map the bf operation probe columns to chunk column indices
 		vector<idx_t> resolved_indices;
+		Printer::Print(StringUtil::Format("[RESOLVE] LogicalUseBF probe_table=%llu has %zu probe_columns",
+			bf_operation.probe_table_idx, bf_operation.probe_columns.size()));
+		Printer::Print(StringUtil::Format("[RESOLVE] child_bindings.size()=%zu", child_bindings.size()));
+		for (idx_t j = 0; j < child_bindings.size(); j++) {
+			Printer::Print(StringUtil::Format("  child_bindings[%llu] = table_idx=%llu, col_idx=%llu",
+				j, child_bindings[j].table_index, child_bindings[j].column_index));
+		}
+
 		for (const ColumnBinding &column_binding: bf_operation.probe_columns) {
+			Printer::Print(StringUtil::Format("[RESOLVE] Looking for probe_column: table_idx=%llu, col_idx=%llu",
+				column_binding.table_index, column_binding.column_index));
 			// find the position of the bf column ColumnBinding in the chunk columns
 			for (idx_t i = 0; i < child_bindings.size(); i++) {
 				if (child_bindings[i].table_index == column_binding.table_index &&
 					child_bindings[i].column_index == column_binding.column_index) {
 					resolved_indices.push_back(i);
+					Printer::Print(StringUtil::Format("[RESOLVE] Matched at chunk position %llu", i));
 					break;
 				}
 			}

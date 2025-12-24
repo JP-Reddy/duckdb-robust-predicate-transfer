@@ -183,7 +183,7 @@ private:
 	vector<idx_t> bound_cols_built;
 };
 
-// builder for constructing bloom filter from hash values
+// builder for constructing bloom filter from raw data
 // it is used for parallel finalize with atomic bloom filter operations
 class BloomFilterBuilder {
 public:
@@ -192,7 +192,7 @@ public:
 	// initialize builder with target bf and columns to hash
 	void Begin(shared_ptr<BloomFilter> bf, const vector<idx_t> &bound_cols);
 
-	void PushNextBatch(int64_t num_rows, const uint64_t *hashes) const;
+	void PushNextBatch(DataChunk &chunk) const;
 
 	vector<idx_t> BuiltCols() const;
 private:

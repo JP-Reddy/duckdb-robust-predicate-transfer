@@ -74,18 +74,9 @@ void BloomFilterBuilder::Begin(shared_ptr<BloomFilter> bf, const vector<idx_t> &
 	this->bound_cols = bound_cols;
 }
 
-void BloomFilterBuilder::PushNextBatch(int64_t num_rows, const uint64_t *hashes) const {
-	// create temp chunk for hashing
-	DataChunk temp_chunk;
-	temp_chunk.Initialize(Allocator::DefaultAllocator(),{LogicalType::HASH});
-	temp_chunk.SetCardinality(num_rows);
-
-	// copy hashes to chunk
-	auto hash_data = FlatVector::GetData<uint64_t>(temp_chunk.data[0]);
-	memcpy(hash_data, hashes, num_rows * sizeof(hash_t));
-
-	vector<idx_t> hash_col = {0};
-	bloom_filter->Insert(temp_chunk, hash_col);
+void BloomFilterBuilder::PushNextBatch(DataChunk &chunk) const {
+	// hash the raw data once and insert into bloom filter
+	bloom_filter->Insert(chunk, bound_cols);
 }
 
 vector<idx_t> BloomFilterBuilder::BuiltCols() const {

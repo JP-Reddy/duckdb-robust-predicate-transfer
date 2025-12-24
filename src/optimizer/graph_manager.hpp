@@ -8,6 +8,21 @@
 
 
 namespace duckdb {
+
+// hash function for ColumnBinding to use as map key
+struct ColumnBindingHash {
+	size_t operator()(const ColumnBinding &binding) const {
+		return std::hash<idx_t>()(binding.table_index) ^
+		       (std::hash<idx_t>()(binding.column_index) << 16);
+	}
+};
+
+// equality for ColumnBinding
+struct ColumnBindingEqual {
+	bool operator()(const ColumnBinding &a, const ColumnBinding &b) const {
+		return a.table_index == b.table_index && a.column_index == b.column_index;
+	}
+};
 typedef idx_t table_id;
 	class JoinEdge {
 	public:
