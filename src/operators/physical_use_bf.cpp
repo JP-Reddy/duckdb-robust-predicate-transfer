@@ -98,8 +98,8 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		// 	printf("bound columns for %s - %llu\n", probe_table.c_str(), bound_column_indices[i]);
 		// }
 
-		if (!bf_state.tested_hardcoded && bf_operation && bf_operation->build_table_idx == 2) {
-			printf("\n[HARDCODED TEST IN USE_BF] Testing if 37 title IDs can be found in bloom filter from table_2...\n");
+		if (!bf_state.tested_hardcoded && bf_operation && bf_operation->build_table_idx == 3) {
+			printf("\n[HARDCODED TEST IN USE_BF] Testing if 37 title IDs can be found in bloom filter from table_3...\n");
 
 			vector<int32_t> test_ids = {
 				929582, 1547687, 1669098, 1688430, 1695344, 1710439, 1779162, 1739896,
@@ -185,7 +185,7 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 	// Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
 	string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	printf("[EXECUTE] USE_BF (probe=%s, this=%p, build=%s) Selected %llu rows \n", probe_table.c_str(), (void*)this, build_table.c_str(), result_count);
+	// printf("[EXECUTE] USE_BF (probe=%s, this=%p, build=%s) Selected %llu rows \n", probe_table.c_str(), (void*)this, build_table.c_str(), result_count);
 	// chunk.Print();
 	return OperatorResultType::NEED_MORE_INPUT;
 }

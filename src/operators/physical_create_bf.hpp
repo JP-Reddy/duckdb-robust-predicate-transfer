@@ -93,7 +93,10 @@ public:
 
 class CreateBFLocalSourceState : public LocalSourceState {
 public:
-	CreateBFLocalSourceState() = default;
+	CreateBFLocalSourceState() {
+		local_current_chunk_id = 0;
+		initial = true;
+	}
 
 public:
 	idx_t local_current_chunk_id;

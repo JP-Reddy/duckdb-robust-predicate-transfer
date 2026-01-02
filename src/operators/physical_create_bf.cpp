@@ -51,8 +51,8 @@ CreateBFGlobalSinkState::CreateBFGlobalSinkState(ClientContext &context, const P
 SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	CreateBFLocalSinkState &local_state = input.local_state.Cast<CreateBFLocalSinkState>();
 
-	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	printf("[SINK] CREATE_BF (build=%s, this=%p): Received chunk with %llu rows\n", build_table.c_str(), (void*)this, chunk.size());
+	// string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
+	// printf("[SINK] CREATE_BF (build=%s, this=%p): Received chunk with %llu rows\n", build_table.c_str(), (void*)this, chunk.size());
 
 	local_state.local_data->Append(chunk);
 	return SinkResultType::NEED_MORE_INPUT;
@@ -188,7 +188,7 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 	printf("[FINALIZE] CREATE_BF (build=%s, this=%p): total_data contains %llu rows\n",
 		   build_table.c_str(), (void*)this, gsink.total_data->Count());
-	printf("[FINALIZE] total_data: \n");
+	// printf("[FINALIZE] total_data: \n");
 	// gsink.total_data->Print();
 
 	gsink.local_data_collections.clear();
@@ -248,6 +248,7 @@ CreateBFGlobalSourceState::CreateBFGlobalSourceState(ClientContext &context, con
 	D_ASSERT(op.sink_state);
 	auto &gstate = op.sink_state->Cast<CreateBFGlobalSinkState>();
 	gstate.total_data->InitializeScan(scan_state);
+	partition_id = 0;
 }
 
 idx_t CreateBFGlobalSourceState::MaxThreads() {
@@ -289,13 +290,16 @@ unique_ptr<LocalSourceState> PhysicalCreateBF::GetLocalSourceState(
 	return make_uniq<CreateBFLocalSourceState>();
 }
 
+// TODO: fetch the chunks parallely
 SourceResultType PhysicalCreateBF::GetData(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const {
+
 	auto &gstate = sink_state->Cast<CreateBFGlobalSinkState>();
 	auto &lstate = input.local_state.Cast<CreateBFLocalSourceState>();
 	auto &state = input.global_state.Cast<CreateBFGlobalSourceState>();
 
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-
+	// Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) GetData start: partition_id=%llu, chunks_todo.size()=%zu, local_current_chunk_id=%zu\n",
+	// 			build_table.c_str(), lstate.local_partition_id, state.chunks_todo.size(), lstate.local_current_chunk_id));
 	if(lstate.initial) {
 		lstate.local_partition_id = state.partition_id++;
 		lstate.initial = false;
@@ -314,24 +318,27 @@ SourceResultType PhysicalCreateBF::GetData(ExecutionContext &context, DataChunk 
 			build_table.c_str(), lstate.chunk_from, lstate.chunk_to));
 	}
 
-	if (lstate.local_current_chunk_id == 0) {
-		lstate.local_current_chunk_id = lstate.chunk_from;
-	} else if(lstate.local_current_chunk_id >= lstate.chunk_to) {
-		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Partition exhausted (chunk_id=%llu >= chunk_to=%llu), returning FINISHED",
-			build_table.c_str(), lstate.local_current_chunk_id, lstate.chunk_to));
-		return SourceResultType::FINISHED;
-	}
-
 	auto chunk_count = gstate.total_data->ChunkCount();
 
 	if (lstate.local_current_chunk_id >= chunk_count) {
-		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) ERROR: trying to fetch chunk_id=%llu but chunk_count=%llu",
-			build_table.c_str(), lstate.local_current_chunk_id, chunk_count));
-		throw InternalException("CREATE_BF GetData: chunk_id out of bounds");
+		// Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) ERROR: trying to fetch chunk_id=%llu but chunk_count=%llu",
+		// 	build_table.c_str(), lstate.local_current_chunk_id, chunk_count));
+		// throw InternalException("CREATE_BF GetData: chunk_id out of bounds");
+		return SourceResultType::FINISHED;
 	}
 
-	Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Fetching chunk %llu (total chunks=%llu)",
-		build_table.c_str(), lstate.local_current_chunk_id, chunk_count));
+	if (lstate.local_current_chunk_id == 0) {
+		lstate.local_current_chunk_id = lstate.chunk_from;
+	// } else if(lstate.local_current_chunk_id >= lstate.chunk_to) {
+	// 	Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Partition exhausted (chunk_id=%llu >= chunk_to=%llu), returning FINISHED",
+	// 		build_table.c_str(), lstate.local_current_chunk_id, lstate.chunk_to));
+	// 	// lstate.local_current_chunk_id++;
+	// 	return SourceResultType::HAVE_MORE_OUTPUT;
+	}
+	// else if ()
+
+	// Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Fetching chunk %llu (total chunks=%llu)",
+	// 	build_table.c_str(), lstate.local_current_chunk_id, chunk_count));
 
 	gstate.total_data->FetchChunk(lstate.local_current_chunk_id++, chunk);
 	return SourceResultType::HAVE_MORE_OUTPUT;
@@ -344,7 +351,7 @@ void PhysicalCreateBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipe
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 	char ptr_str[32];
 	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
-	Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
+	// Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
 
 	auto &state = meta_pipeline.GetState();
 

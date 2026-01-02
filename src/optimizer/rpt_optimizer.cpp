@@ -12,6 +12,8 @@
 #include "duckdb/common/unordered_map.hpp"
 #include "../operators/logical_create_bf.hpp"
 #include "../operators/logical_use_bf.hpp"
+
+#include <_assert.h>
 #include <fmt/format.h>
 
 namespace duckdb {
@@ -524,8 +526,9 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			// CREATE_BF on child
 			BloomFilterOperation create_op;
 			create_op.build_table_idx = child_node->table_idx;
-			create_op.probe_table_idx = 0; // not used for CREATE operations
+			create_op.probe_table_idx = parent_node->table_idx;
 			create_op.build_columns = child_columns;
+			create_op.probe_columns = parent_columns;
 			create_op.is_create = true;
 			create_op.sequence_number = sequence++;
 			forward_bf_ops[child_node->table_op].push_back(create_op);
@@ -578,8 +581,9 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			// CREATE_BF on parent
 			BloomFilterOperation create_op;
 			create_op.build_table_idx = parent_node->table_idx;
-			create_op.probe_table_idx = 0; // not used for CREATE operations
+			create_op.probe_table_idx = child_node->table_idx;
 			create_op.build_columns = parent_columns;
+			create_op.probe_columns = child_columns;
 			create_op.is_create = true;
 			create_op.sequence_number = sequence++;
 			backward_bf_ops[parent_node->table_op].push_back(create_op);
@@ -638,11 +642,13 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(un
 
 				// collect all build columns
 				for (const auto &op : consecutive_creates) {
-					for (const auto &col : op.build_columns) {
-						merged_op.build_columns.push_back(col);
+					// for (const auto &col : op.build_columns) {
+					for (idx_t x = 0; x < op.build_columns.size(); x++) {
+						// __assert(op.build_columns.size() == op.probe_columns.size(),"Merging consecutive CREATE_BFs: Build columns and probe columns size different");
+						merged_op.build_columns.push_back(op.build_columns[x]);
+						merged_op.probe_columns.push_back(op.probe_columns[x]);
 					}
 				}
-
 				merged_ops.push_back(merged_op);
 			}
 
@@ -712,9 +718,9 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::ApplyStageModifications(un
 	// add the backward pass bf operators above the forward pass bf operators
 	auto backward_it = backward_bf_ops.find(original_op);
 	if (backward_it != backward_bf_ops.end()) {
-		for (size_t i = 0; i < backward_it->second.size(); i++) {
-			const auto &op = backward_it->second[i];
-		}
+		// for (size_t i = 0; i < backward_it->second.size(); i++) {
+		// 	const auto &op = backward_it->second[i];
+		// }
 		plan = BuildStackedBFOperators(std::move(plan), backward_it->second, false);
 	}
 
