@@ -185,7 +185,7 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 	// Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
 	string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	// printf("[EXECUTE] USE_BF (probe=%s, this=%p, build=%s) Selected %llu rows \n", probe_table.c_str(), (void*)this, build_table.c_str(), result_count);
+	printf("[EXECUTE] USE_BF (probe=%s, this=%p, build=%s) Selected %llu rows \n", probe_table.c_str(), (void*)this, build_table.c_str(), result_count);
 	// chunk.Print();
 	return OperatorResultType::NEED_MORE_INPUT;
 }

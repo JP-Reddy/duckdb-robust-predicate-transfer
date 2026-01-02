@@ -27,6 +27,16 @@ vector<JoinEdge> RPTOptimizerContextState::ExtractOperators(LogicalOperator &pla
 	// pass 1: collect the base tables and join operators
 	ExtractOperatorsRecursive(plan, join_ops);
 
+	// debug: print summary of registered nodes
+	printf("\n=== REGISTERED NODES SUMMARY ===\n");
+	for (const auto &[table_idx, table_info] : table_mgr.table_lookup) {
+		printf("  table_idx=%llu -> op=%p (type=%d, cardinality=%llu)\n",
+			   table_idx, (void*)table_info.table_op, (int)table_info.table_op->type,
+			   table_info.estimated_cardinality);
+	}
+	printf("Total registered nodes: %zu\n", table_mgr.table_lookup.size());
+	printf("Total join operators found: %zu\n\n", join_ops.size());
+
 	// pass 2: create JoinEdges with table information
 	return CreateJoinEdges(join_ops);
 }
@@ -64,7 +74,21 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 		case LogicalOperatorType::LOGICAL_FILTER: {
 			LogicalOperator *child = op->children[0].get();
 			if(child->type == LogicalOperatorType::LOGICAL_GET) {
-				table_mgr.AddTableOperator(child);
+				// register FILTER as node (not GET) - like reference impl
+				printf("[NODE_REG] Registering FILTER (child=GET) for table_idx=%llu, op=%p\n",
+					   table_mgr.GetScalarTableIndex(op), (void*)op);
+				table_mgr.AddTableOperator(op);
+				return;
+			}
+			else if (child->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN ||
+			         child->type == LogicalOperatorType::LOGICAL_DELIM_JOIN) {
+				// for IN-clause optimization (MARK join), register FILTER as node
+				// the table_index comes from the join's left child
+				printf("[NODE_REG] Registering FILTER (child=JOIN) for table_idx=%llu, op=%p\n",
+					   table_mgr.GetScalarTableIndex(op), (void*)op);
+				table_mgr.AddTableOperator(op);
+				// still recurse into the join to collect join edges and other tables
+				ExtractOperatorsRecursive(*child, join_ops);
 				return;
 			}
 
@@ -118,6 +142,7 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 		case LogicalOperatorType::LOGICAL_GET:
 		case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
 		case LogicalOperatorType::LOGICAL_CHUNK_GET:
+				printf("[NODE_REG] Registering base table scan, type=%d, op=%p\n", (int)op->type, (void*)op);
 				table_mgr.AddTableOperator(op);
 				return;
 		default:
