@@ -4,6 +4,7 @@
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/parallel/meta_pipeline.hpp"
+#include "debug_utils.hpp"
 
 namespace duckdb {
 
@@ -38,10 +39,10 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 
 	// lazy initialization of bloom filters on first call
 	if (!bf_state.bloom_filters_initialized) {
-		printf("[EXEC_INTERNAL] USE_BF (probe=%s, this=%p) Initializing bloom filters, bound_column_indices.size()=%zu\n",
-			table_name.c_str(), (void*)this, bound_column_indices.size());
+		D_PRINTF("[EXEC_INTERNAL] USE_BF (probe=%s) Initializing bloom filters, bound_column_indices.size()=%zu",
+		         table_name.c_str(), bound_column_indices.size());
 		for (size_t i = 0; i < bound_column_indices.size(); i++) {
-			printf("  bound_column_indices[%zu] = %llu\n", i, bound_column_indices[i]);
+			D_PRINTF("  bound_column_indices[%zu] = %llu", i, (unsigned long long)bound_column_indices[i]);
 		}
 
 		if (!related_create_bf_vec.empty() && bf_operation) {
@@ -52,15 +53,15 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 					if (bf) {
 						string build_table = create_bf->bf_operation ?
 							"table_" + std::to_string(create_bf->bf_operation->build_table_idx) : "unknown";
-						printf("[EXEC_INTERNAL] USE_BF found bloom filter for col(%llu,%llu) from CREATE_BF (build=%s)\n",
-							build_col.table_index, build_col.column_index, build_table.c_str());
+						D_PRINTF("[EXEC_INTERNAL] USE_BF found bloom filter for col(%llu,%llu) from CREATE_BF (build=%s)",
+						         (unsigned long long)build_col.table_index, (unsigned long long)build_col.column_index, build_table.c_str());
 						bf_state.bloom_filters.push_back(bf);
 						break; // found the filter for this column
 					}
 				}
 			}
 		}
-		printf("[EXEC_INTERNAL] USE_BF total bloom_filters.size() = %zu\n", bf_state.bloom_filters.size());
+		D_PRINTF("[EXEC_INTERNAL] USE_BF total bloom_filters.size() = %zu", bf_state.bloom_filters.size());
 		bf_state.bloom_filters_initialized = true;
 	}
 
@@ -68,7 +69,8 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 
 	// if no bloom filters or no input, just pass through
 	if (bf_state.bloom_filters.empty() || row_num == 0) {
-		printf("[EXEC_INTERNAL] USE_BF (probe=%s, this=%p) No bloom filter input/empty, row_num = %llu\n", table_name.c_str(), (void*)this, row_num);
+		D_PRINTF("[EXEC_INTERNAL] USE_BF (probe=%s) No bloom filter input/empty, row_num = %llu", 
+		         table_name.c_str(), (unsigned long long)row_num);
 		chunk.Reference(input);
 		return OperatorResultType::NEED_MORE_INPUT;
 	}
@@ -80,14 +82,14 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 	for (int i = 0; i < bf_state.bloom_filters.size(); i++) {
 		auto bf = bf_state.bloom_filters[i];
 		if (!bf || !bf->finalized_) {
-			printf("skipppppped");
+			D_PRINT("skipped - bloom filter not ready");
 			continue;
 		}
 
 		// check if bloom filter is empty (no data inserted)
 		if (bf->num_sectors == 0 || bf->blocks == nullptr) {
 			string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-			printf("Bloom filter empty for %s\n", build_table.c_str());
+			D_PRINTF("Bloom filter empty for %s", build_table.c_str());
 			// empty filter means no matches possible
 			chunk.SetCardinality(0);
 			return OperatorResultType::NEED_MORE_INPUT;
@@ -98,8 +100,9 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		// 	printf("bound columns for %s - %llu\n", probe_table.c_str(), bound_column_indices[i]);
 		// }
 
+#ifdef DEBUG
 		if (!bf_state.tested_hardcoded && bf_operation && bf_operation->build_table_idx == 3) {
-			printf("\n[HARDCODED TEST IN USE_BF] Testing if 37 title IDs can be found in bloom filter from table_3...\n");
+			Printer::Print("\n[HARDCODED TEST IN USE_BF] Testing if 37 title IDs can be found in bloom filter from table_3...");
 
 			vector<int32_t> test_ids = {
 				929582, 1547687, 1669098, 1688430, 1695344, 1710439, 1779162, 1739896,
@@ -126,26 +129,27 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 
 			int found = 0;
 			int missing = 0;
-			printf("  Testing %zu IDs using column index 0:\n", test_ids.size());
+			Printer::PrintF("  Testing %zu IDs using column index 0:", test_ids.size());
 			for (size_t i = 0; i < test_ids.size(); i++) {
 				if (test_results[i] != 0) {
 					found++;
 				} else {
 					missing++;
-					printf("    ❌ ID %d NOT FOUND (BUG!)\n", test_ids[i]);
+					Printer::PrintF("    ID %d NOT FOUND (BUG!)", test_ids[i]);
 				}
 			}
-			printf("  Found: %d / %zu\n", found, test_ids.size());
-			printf("  Missing: %d / %zu\n", missing, test_ids.size());
+			Printer::PrintF("  Found: %d / %zu", found, test_ids.size());
+			Printer::PrintF("  Missing: %d / %zu", missing, test_ids.size());
 
 			if (missing > 0) {
-				printf("  ❌ BLOOM FILTER LOOKUP FAILED FROM USE_BF!\n");
+				Printer::Print("  BLOOM FILTER LOOKUP FAILED FROM USE_BF!");
 			} else {
-				printf("  ✅ All 37 IDs found in bloom filter from USE_BF!\n");
+				Printer::Print("  All 37 IDs found in bloom filter from USE_BF!");
 			}
 
 			bf_state.tested_hardcoded = true;
 		}
+#endif
 
 		// use bound column indices for vectorized lookup
 		vector<uint32_t> results(row_num);
@@ -180,56 +184,37 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		chunk.Slice(input, sel, result_count);
 	}
 
-	// char ptr_str[32];
-	// snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
-	// Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
-	string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
-	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	printf("[EXECUTE] USE_BF (probe=%s, this=%p, build=%s) Selected %llu rows \n", probe_table.c_str(), (void*)this, build_table.c_str(), result_count);
-	// chunk.Print();
+	// string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
+	// string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
+	// D_PRINTF("[EXECUTE] USE_BF (probe=%s, build=%s) Selected %llu rows",
+	//          probe_table.c_str(), build_table.c_str(), (unsigned long long)result_count);
 	return OperatorResultType::NEED_MORE_INPUT;
 }
 
 void PhysicalUseBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) {
 	op_state.reset();
 
+#ifdef DEBUG
 	char ptr_str[32];
 	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
-	// Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
 	string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
 	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s, this=%s) BuildPipelines called", probe_table.c_str(), ptr_str));
+#endif
 
 	auto &state = meta_pipeline.GetState();
 	state.AddPipelineOperator(current, *this);
-	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s, this=%s) added to current pipeline as operator", probe_table.c_str(), ptr_str));
 
-	// add dependencies on all related CREATE_BF operators
+#ifdef DEBUG
+	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s, this=%s) added to current pipeline as operator", probe_table.c_str(), ptr_str));
 	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) has %zu related CREATE_BF operators",
 		probe_table.c_str(), related_create_bf_vec.size()));
+#endif
 
+	// add dependencies on all related CREATE_BF operators
 	for (size_t i = 0; i < related_create_bf_vec.size(); i++) {
 		auto *create_bf = related_create_bf_vec[i];
-		// string build_table = create_bf->bf_operation ?
-		// 	"table_" + std::to_string(create_bf->bf_operation->build_table_idx) : "unknown";
-		// Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) adding dependency #%zu on CREATE_BF (build=%s)",
-		// 	probe_table.c_str(), i, build_table.c_str()));
 		create_bf->BuildPipelinesFromRelated(current, meta_pipeline);
-
-		// Printer::Print(StringUtil::Format("[PIPELINE DEBUG] USE_BF (probe=%s) After adding dependency #%zu:", probe_table.c_str(), i));
-		// current.PrintDependencies();
 	}
-
-	// Printer::Print(StringUtil::Format("[PIPELINE DEBUG] USE_BF (probe=%s) Final pipeline state:", probe_table.c_str()));
-	try {
-		// current.Print();
-		// Printer::Print("Pipeline Dependencies");
-		// current.PrintDependencies();
-	} catch (...) {
-		// Printer::Print("  (Pipeline not yet fully initialized)");
-	}
-	// Printer::Print("");
-
-	// Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) building child operator pipelines", probe_table.c_str()));
 
 	// continue building child pipelines
 	children[0].get().BuildPipelines(current, meta_pipeline);

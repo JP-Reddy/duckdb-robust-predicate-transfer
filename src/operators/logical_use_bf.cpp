@@ -1,6 +1,7 @@
 #include "logical_use_bf.hpp"
 #include "physical_use_bf.hpp"
 #include "dag.hpp"
+#include "debug_utils.hpp"
 
 namespace duckdb {
 
@@ -54,23 +55,27 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 
 		// step 2: resolve/map the bf operation probe columns to chunk column indices
 		vector<idx_t> resolved_indices;
+
+#ifdef DEBUG
 		Printer::Print(StringUtil::Format("[RESOLVE] LogicalUseBF probe_table=%llu has %zu probe_columns",
-			bf_operation.probe_table_idx, bf_operation.probe_columns.size()));
+			(unsigned long long)bf_operation.probe_table_idx, bf_operation.probe_columns.size()));
 		Printer::Print(StringUtil::Format("[RESOLVE] child_bindings.size()=%zu", child_bindings.size()));
 		for (idx_t j = 0; j < child_bindings.size(); j++) {
 			Printer::Print(StringUtil::Format("  child_bindings[%llu] = table_idx=%llu, col_idx=%llu",
-				j, child_bindings[j].table_index, child_bindings[j].column_index));
+				(unsigned long long)j, (unsigned long long)child_bindings[j].table_index, 
+				(unsigned long long)child_bindings[j].column_index));
 		}
+#endif
 
 		for (const ColumnBinding &column_binding: bf_operation.probe_columns) {
-			Printer::Print(StringUtil::Format("[RESOLVE] Looking for probe_column: table_idx=%llu, col_idx=%llu",
-				column_binding.table_index, column_binding.column_index));
+			D_PRINTF("[RESOLVE] Looking for probe_column: table_idx=%llu, col_idx=%llu",
+			         (unsigned long long)column_binding.table_index, (unsigned long long)column_binding.column_index);
 			// find the position of the bf column ColumnBinding in the chunk columns
 			for (idx_t i = 0; i < child_bindings.size(); i++) {
 				if (child_bindings[i].table_index == column_binding.table_index &&
 					child_bindings[i].column_index == column_binding.column_index) {
 					resolved_indices.push_back(i);
-					Printer::Print(StringUtil::Format("[RESOLVE] Matched at chunk position %llu", i));
+					D_PRINTF("[RESOLVE] Matched at chunk position %llu", (unsigned long long)i);
 					break;
 				}
 			}
@@ -85,14 +90,14 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 			resolved_indices);
 		physical = static_cast<PhysicalUseBF*>(&physical_op);
 
-		if (related_create_bf) {
-			string probe_table = "table_" + std::to_string(bf_operation.probe_table_idx);
-			Printer::Print(StringUtil::Format("[LOGICAL USE] probe table - %s Related_create_bf exists", probe_table.c_str()));
-		}
 		// set up reference to related PhysicalCreateBF if available
+		if (related_create_bf) {
+			D_PRINTF("[LOGICAL USE] probe table - table_%llu Related_create_bf exists", 
+			         (unsigned long long)bf_operation.probe_table_idx);
+		}
 		if (related_create_bf && related_create_bf->physical) {
-			string probe_table = "table_" + std::to_string(bf_operation.probe_table_idx);
-			Printer::Print(StringUtil::Format("[LOGICAL USE] probe table - %s Related_create_bf  physical exists", probe_table.c_str()));
+			D_PRINTF("[LOGICAL USE] probe table - table_%llu Related_create_bf physical exists", 
+			         (unsigned long long)bf_operation.probe_table_idx);
 			physical->related_create_bf = related_create_bf->physical;
 			physical->related_create_bf_vec.push_back(related_create_bf->physical);
 		}
