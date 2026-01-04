@@ -1,6 +1,7 @@
 #include "table_manager.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
+#include "debug_utils.hpp"
 
 namespace duckdb {
 
@@ -75,13 +76,14 @@ void TableManager::AddTableOperator(LogicalOperator *op) {
 	tbl_info.table_op = op;
 
 	if (table_idx != std::numeric_limits<idx_t>::max() && table_lookup.find(table_idx) == table_lookup.end()) {
-		printf("[NODE_REG] AddTableOperator: type=%s, table_idx=%llu, cardinality=%llu, op=%p\n",
-			   GetOpTypeName(op->type), table_idx, tbl_info.estimated_cardinality, (void*)op);
+		D_PRINTF("[NODE_REG] AddTableOperator: type=%s, table_idx=%llu, cardinality=%llu",
+		         GetOpTypeName(op->type), (unsigned long long)table_idx,
+		         (unsigned long long)tbl_info.estimated_cardinality);
 		table_lookup[table_idx] = tbl_info;
 		table_ops.push_back(tbl_info);
 	} else if (table_idx != std::numeric_limits<idx_t>::max()) {
-		printf("[NODE_REG] AddTableOperator SKIPPED (already exists): type=%s, table_idx=%llu, op=%p\n",
-			   GetOpTypeName(op->type), table_idx, (void*)op);
+		D_PRINTF("[NODE_REG] AddTableOperator SKIPPED (already exists): type=%s, table_idx=%llu",
+		         GetOpTypeName(op->type), (unsigned long long)table_idx);
 	}
 }
 

@@ -5,6 +5,7 @@
 #include "predicate_transfer_optimization.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+#include "debug_utils.hpp"
 
 #include <queue>
 
@@ -48,56 +49,58 @@ static void UnionBindings(const ColumnBinding &a, const ColumnBinding &b, const 
 }
 
 bool TransferGraphManager::Build(LogicalOperator &plan) {
-	printf("\n=== BUILD TRANSFER GRAPH MANAGER ===\n");
+	D_PRINT("\n=== BUILD TRANSFER GRAPH MANAGER ===");
 	
 	// 1. Extract all operators, including table operators and join operators
 	const vector<reference<LogicalOperator>> joins = table_operator_manager.ExtractOperators(plan);
-	printf("1. extracted operators: %zu table operators, %zu join operators\n", 
-	       table_operator_manager.table_operators.size(), joins.size());
+	D_PRINTF("1. extracted operators: %zu table operators, %zu join operators", 
+	         table_operator_manager.table_operators.size(), joins.size());
 	
 	if (table_operator_manager.table_operators.size() < 2) {
-		printf("not enough table operators (< 2), skipping\n");
+		D_PRINT("not enough table operators (< 2), skipping");
 		return false;
 	}
 
 	// print table operators
-	printf("table operators:\n");
+	D_PRINT("table operators:");
 	for (auto &pair : table_operator_manager.table_operators) {
 		auto &op = *pair.second;
-		printf("  table_idx=%llu, type=%s, cardinality=%llu\n",
-		       pair.first, LogicalOperatorToString(op.type).c_str(), op.estimated_cardinality);
+		D_PRINTF("  table_idx=%llu, type=%s, cardinality=%llu",
+		         (unsigned long long)pair.first, LogicalOperatorToString(op.type).c_str(), 
+		         (unsigned long long)op.estimated_cardinality);
 	}
 
 	// 2. Getting graph edges information from join operators
 	ExtractEdgesInfo(joins);
-	printf("2. extracted edges: neighbor_matrix size=%zu\n", neighbor_matrix.size());
+	D_PRINTF("2. extracted edges: neighbor_matrix size=%zu", neighbor_matrix.size());
 	
 	if (neighbor_matrix.empty()) {
-		printf("no edges extracted, skipping\n");
+		D_PRINT("no edges extracted, skipping");
 		return false;
 	}
 
 	// print edge information
-	printf("edge information:\n");
+	D_PRINT("edge information:");
 	for (auto &pair : neighbor_matrix) {
 		idx_t table1 = pair.first;
 		for (auto &edge_pair : pair.second) {
 			idx_t table2 = edge_pair.first;
 			auto &edge = edge_pair.second;
-			printf("  edge: table_%llu <-> table_%llu, protect_left=%s, protect_right=%s\n",
-			       table1, table2, edge->protect_left ? "true" : "false", edge->protect_right ? "true" : "false");
+			D_PRINTF("  edge: table_%llu <-> table_%llu, protect_left=%s, protect_right=%s",
+			         (unsigned long long)table1, (unsigned long long)table2, 
+			         edge->protect_left ? "true" : "false", edge->protect_right ? "true" : "false");
 		}
 	}
 
 	// 3. unfiltered table only receives bloom filters, they will not generate bloom filters.
 	// SkipUnfilteredTable(joins);
-	printf("3. after SkipUnfilteredTable: neighbor_matrix size=%zu\n", neighbor_matrix.size());
+	D_PRINTF("3. after SkipUnfilteredTable: neighbor_matrix size=%zu", neighbor_matrix.size());
 
 	// 4. create the transfer graph
-	printf("4. calling CreateTransferPlanUpdated()\n");
+	D_PRINT("4. calling CreateTransferPlanUpdated()");
 	CreateTransferPlanUpdated();
 
-	printf("=== BUILD COMPLETE ===\n\n");
+	D_PRINT("=== BUILD COMPLETE ===\n");
 	return true;
 }
 
@@ -324,16 +327,16 @@ void TransferGraphManager::ClassifyTables() {
 		if (table->type == LogicalOperatorType::LOGICAL_GET) {
 			auto &get = table->Cast<LogicalGet>();
 			if (get.table_filters.filters.empty()) {
-				std::cout << "table_" << id << " has no table filters\n";
-				printf("  table_%llu marked as UNFILTERED (no table filters)\n", id);
+				D_PRINTF("table_%llu has no table filters", (unsigned long long)id);
+				D_PRINTF("  table_%llu marked as UNFILTERED (no table filters)", (unsigned long long)id);
 				unfiltered_table.insert(id);
 				continue;
 			} else {
-				printf("  table_%llu has %zu table filters\n", id, get.table_filters.filters.size());
+				D_PRINTF("  table_%llu has %zu table filters", (unsigned long long)id, get.table_filters.filters.size());
 			}
 		}
 
-		std::cout<< "Adding table_" << id << " to filtered table\n";
+		D_PRINTF("Adding table_%llu to filtered table", (unsigned long long)id);
 		// last, it is a filtered table
 		filtered_table.insert(id);
 	}
@@ -348,11 +351,10 @@ void TransferGraphManager::SkipUnfilteredTable(const vector<reference<LogicalOpe
 		}
 	}
 
-	printf("SkipUnfilteredTable: found %zu unfiltered tables: ", unfiltered_table.size());
+	D_PRINTF("SkipUnfilteredTable: found %zu unfiltered tables", unfiltered_table.size());
 	for (auto table_idx : unfiltered_table) {
-		printf("table_%llu ", table_idx);
+		D_PRINTF("  table_%llu", (unsigned long long)table_idx);
 	}
-	printf("\n");
 
 	bool changed = false;
 	do {
@@ -527,15 +529,19 @@ void TransferGraphManager::LargestRootUpdated(vector<LogicalOperator *> &sorted_
 	int prior_flag = static_cast<int>(table_operator_manager.table_operators.size()) - 1;
 	idx_t root = std::numeric_limits<idx_t>::max();
 
-	printf("Sorted nodes order - descending order: \n");
+#ifdef DEBUG
+	Printer::Print("Sorted nodes order - descending order:");
+	string nodes_str = "  ";
 	for (auto it = sorted_nodes.rbegin(); it != sorted_nodes.rend(); ++it) {
 		auto &node = *it;
 		idx_t table_idx = table_operator_manager.GetScalarTableIndex(node);
-		std::cout << table_idx << " " ;
+		nodes_str += std::to_string(table_idx) + " ";
 	}
+	Printer::Print(nodes_str);
+#endif
 
 	root = table_operator_manager.GetScalarTableIndex(sorted_nodes.back());
-	std::cout << "\nRoot = " << root << std::endl;
+	D_PRINTF("Root = %llu", (unsigned long long)root);
 
 	// Try to choose the largest filtered or intermediate table as the root
 	// for (auto it = sorted_nodes.rbegin(); it != sorted_nodes.rend(); ++it) {
@@ -554,9 +560,9 @@ void TransferGraphManager::LargestRootUpdated(vector<LogicalOperator *> &sorted_
 		root = table_operator_manager.GetScalarTableIndex(node);
 	}
 
-	printf("LargestRootUpdated: selected root = table_%llu\n", root);
-	printf("filtered_table.size()=%zu, intermediate_table.size()=%zu\n",
-	       filtered_table.size(), intermediate_table.size());
+	D_PRINTF("LargestRootUpdated: selected root = table_%llu", (unsigned long long)root);
+	D_PRINTF("filtered_table.size()=%zu, intermediate_table.size()=%zu",
+	         filtered_table.size(), intermediate_table.size());
 
 	// Initialize nodes
 	for (auto &entry : table_operator_manager.table_operators) {
@@ -588,8 +594,8 @@ void TransferGraphManager::LargestRootUpdated(vector<LogicalOperator *> &sorted_
 			break;
 		}
 
-		printf("  spanning tree edge: table_%llu <-> table_%llu\n",
-		       selected_edge.first, selected_edge.second);
+		D_PRINTF("  spanning tree edge: table_%llu <-> table_%llu",
+		         (unsigned long long)selected_edge.first, (unsigned long long)selected_edge.second);
 
 		auto &edge = neighbor_matrix[selected_edge.first][selected_edge.second];
 		selected_edges.emplace_back(std::move(edge));
@@ -661,10 +667,10 @@ void TransferGraphManager::CreateOriginTransferPlan() {
 }
 
 void TransferGraphManager::CreateTransferPlanUpdated() {
-	printf("\n=== CREATE TRANSFER PLAN UPDATED ===\n");
+	D_PRINT("\n=== CREATE TRANSFER PLAN UPDATED ===");
 	
 	auto saved_nodes = table_operator_manager.table_operators;
-	printf("calling LargestRootUpdated to build spanning tree...\n");
+	D_PRINT("calling LargestRootUpdated to build spanning tree...");
 	
 	while (!table_operator_manager.table_operators.empty()) {
 		LargestRootUpdated(table_operator_manager.sorted_table_operators);
@@ -672,21 +678,23 @@ void TransferGraphManager::CreateTransferPlanUpdated() {
 	}
 	table_operator_manager.table_operators = saved_nodes;
 
-	printf("selected_edges size: %zu\n", selected_edges.size());
-	printf("transfer_order size: %zu\n", transfer_order.size());
+	D_PRINTF("selected_edges size: %zu", selected_edges.size());
+	D_PRINTF("transfer_order size: %zu", transfer_order.size());
 	
-	printf("transfer_order: ");
+#ifdef DEBUG
+	string order_str = "transfer_order: ";
 	for (auto *op : transfer_order) {
 		auto table_idx = TableOperatorManager::GetScalarTableIndex(op);
-		printf("table_%llu ", table_idx);
+		order_str += "table_" + std::to_string(table_idx) + " ";
 	}
-	printf("\n");
+	Printer::Print(order_str);
+#endif
 
-	printf("processing selected edges to build transfer graph...\n");
+	D_PRINT("processing selected edges to build transfer graph...");
 	for (size_t i = 0; i < selected_edges.size(); i++) {
 		auto &edge = selected_edges[i];
 		if (!edge) {
-			printf("  edge %zu: null, skipping\n", i);
+			D_PRINTF("  edge %zu: null, skipping", i);
 			continue;
 		}
 
@@ -705,14 +713,15 @@ void TransferGraphManager::CreateTransferPlanUpdated() {
 		auto protect_left = edge->protect_left;
 		auto protect_right = edge->protect_right;
 
-		printf("  edge %zu: table_%llu (cardinality_order=%d) <-> table_%llu (cardinality_order=%d)\n",
-		       i, left_idx, left_node->cardinality_order, right_idx, right_node->cardinality_order);
-		printf("    protect_left=%s, protect_right=%s\n", 
-		       protect_left ? "true" : "false", protect_right ? "true" : "false");
+		D_PRINTF("  edge %zu: table_%llu (cardinality_order=%d) <-> table_%llu (cardinality_order=%d)",
+		         i, (unsigned long long)left_idx, left_node->cardinality_order, 
+		         (unsigned long long)right_idx, right_node->cardinality_order);
+		D_PRINTF("    protect_left=%s, protect_right=%s", 
+		         protect_left ? "true" : "false", protect_right ? "true" : "false");
 
 		// smaller table is in the left
 		if (left_node->cardinality_order > right_node->cardinality_order) {
-			printf("    swapping order: left becomes right, right becomes left\n");
+			D_PRINT("    swapping order: left becomes right, right becomes left");
 			std::swap(left_node, right_node);
 			std::swap(left_cols, right_cols);
 			std::swap(protect_left, protect_right);
@@ -720,18 +729,20 @@ void TransferGraphManager::CreateTransferPlanUpdated() {
 
 		// forward: from the smaller to the larger
 		if (!protect_right) {
-			printf("    adding FORWARD edges: table_%llu -> table_%llu\n", left_node->id, right_node->id);
+			D_PRINTF("    adding FORWARD edges: table_%llu -> table_%llu", 
+			         (unsigned long long)left_node->id, (unsigned long long)right_node->id);
 			left_node->Add(right_node->id, {left_cols}, {right_cols}, {type}, true, false);
 			right_node->Add(left_node->id, {left_cols}, {right_cols}, {type}, true, true);
 		} else {
-			printf("    skipping forward edges (protect_right=true)\n");
+			D_PRINT("    skipping forward edges (protect_right=true)");
 		}
 
 		// backward: from the larger to the smaller
 		if (!protect_left) {
 			auto &group = table_groups[right_cols];
 			if (group) {
-				printf("    adding BACKWARD edges with GROUP LEADER: table_%llu -> group_leader_%llu\n", left_node->id, group->leader_id);
+				D_PRINTF("    adding BACKWARD edges with GROUP LEADER: table_%llu -> group_leader_%llu", 
+				         (unsigned long long)left_node->id, (unsigned long long)group->leader_id);
 				auto group_leader = group->leader_id;
 				auto &leader_cols = group->leader_column_binding;
 				auto leader = transfer_graph[group_leader].get();
@@ -739,40 +750,50 @@ void TransferGraphManager::CreateTransferPlanUpdated() {
 				left_node->Add(group_leader, {left_cols}, {leader_cols}, {type}, false, true);
 				leader->Add(left_node->id, {left_cols}, {leader_cols}, {type}, false, false);
 			} else {
-				printf("    adding BACKWARD edges: table_%llu -> table_%llu\n", left_node->id, right_node->id);
+				D_PRINTF("    adding BACKWARD edges: table_%llu -> table_%llu", 
+				         (unsigned long long)left_node->id, (unsigned long long)right_node->id);
 				left_node->Add(right_node->id, {left_cols}, {right_cols}, {type}, false, true);
 				right_node->Add(left_node->id, {left_cols}, {right_cols}, {type}, false, false);
 			}
 		} else {
-			printf("    skipping backward edges (protect_left=true)\n");
+			D_PRINT("    skipping backward edges (protect_left=true)");
 		}
 	}
 
 	// print final transfer graph
-	printf("\nfinal transfer graph:\n");
+#ifdef DEBUG
+	Printer::Print("\nfinal transfer graph:");
 	for (auto &pair : transfer_graph) {
 		auto &node = *pair.second;
-		printf("  table_%llu (cardinality_order=%d):\n", node.id, node.cardinality_order);
-		printf("    forward out edges: ");
+		Printer::PrintF("  table_%llu (cardinality_order=%d):", (unsigned long long)node.id, node.cardinality_order);
+		
+		string fwd_out = "    forward out edges: ";
 		for (auto &edge : node.forward_stage_edges.out) {
-			printf("->%llu ", edge->destination);
+			fwd_out += "->" + std::to_string(edge->destination) + " ";
 		}
-		printf("\n    forward in edges: ");
+		Printer::Print(fwd_out);
+		
+		string fwd_in = "    forward in edges: ";
 		for (auto &edge : node.forward_stage_edges.in) {
-			printf("<-%llu ", edge->destination);
+			fwd_in += "<-" + std::to_string(edge->destination) + " ";
 		}
-		printf("\n    backward out edges: ");
+		Printer::Print(fwd_in);
+		
+		string bwd_out = "    backward out edges: ";
 		for (auto &edge : node.backward_stage_edges.out) {
-			printf("->%llu ", edge->destination);
+			bwd_out += "->" + std::to_string(edge->destination) + " ";
 		}
-		printf("\n    backward in edges: ");
+		Printer::Print(bwd_out);
+		
+		string bwd_in = "    backward in edges: ";
 		for (auto &edge : node.backward_stage_edges.in) {
-			printf("<-%llu ", edge->destination);
+			bwd_in += "<-" + std::to_string(edge->destination) + " ";
 		}
-		printf("\n");
+		Printer::Print(bwd_in);
 	}
 	
-	printf("=== END CREATE TRANSFER PLAN UPDATED ===\n\n");
+	Printer::Print("=== END CREATE TRANSFER PLAN UPDATED ===\n");
+#endif
 }
 
 pair<idx_t, idx_t> TransferGraphManager::FindEdge(const unordered_set<idx_t> &constructed_set,

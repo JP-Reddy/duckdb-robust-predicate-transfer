@@ -12,9 +12,7 @@
 #include "duckdb/common/unordered_map.hpp"
 #include "../operators/logical_create_bf.hpp"
 #include "../operators/logical_use_bf.hpp"
-
-#include <_assert.h>
-#include <fmt/format.h>
+#include "debug_utils.hpp"
 
 namespace duckdb {
 // class LogicalCreateBF;
@@ -28,14 +26,14 @@ vector<JoinEdge> RPTOptimizerContextState::ExtractOperators(LogicalOperator &pla
 	ExtractOperatorsRecursive(plan, join_ops);
 
 	// debug: print summary of registered nodes
-	printf("\n=== REGISTERED NODES SUMMARY ===\n");
+	D_PRINT("\n=== REGISTERED NODES SUMMARY ===");
 	for (const auto &[table_idx, table_info] : table_mgr.table_lookup) {
-		printf("  table_idx=%llu -> op=%p (type=%d, cardinality=%llu)\n",
-			   table_idx, (void*)table_info.table_op, (int)table_info.table_op->type,
-			   table_info.estimated_cardinality);
+		D_PRINTF("  table_idx=%llu (type=%d, cardinality=%llu)",
+		         (unsigned long long)table_idx, (int)table_info.table_op->type,
+		         (unsigned long long)table_info.estimated_cardinality);
 	}
-	printf("Total registered nodes: %zu\n", table_mgr.table_lookup.size());
-	printf("Total join operators found: %zu\n\n", join_ops.size());
+	D_PRINTF("Total registered nodes: %zu", table_mgr.table_lookup.size());
+	D_PRINTF("Total join operators found: %zu\n", join_ops.size());
 
 	// pass 2: create JoinEdges with table information
 	return CreateJoinEdges(join_ops);
@@ -74,19 +72,19 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 		case LogicalOperatorType::LOGICAL_FILTER: {
 			LogicalOperator *child = op->children[0].get();
 			if(child->type == LogicalOperatorType::LOGICAL_GET) {
-				// register FILTER as node (not GET) - like reference impl
-				printf("[NODE_REG] Registering FILTER (child=GET) for table_idx=%llu, op=%p\n",
-					   table_mgr.GetScalarTableIndex(op), (void*)op);
-				table_mgr.AddTableOperator(op);
-				return;
+			// register FILTER as node (not GET) - like reference impl
+			D_PRINTF("[NODE_REG] Registering FILTER (child=GET) for table_idx=%llu",
+			         (unsigned long long)table_mgr.GetScalarTableIndex(op));
+			table_mgr.AddTableOperator(op);
+			return;
 			}
 			else if (child->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN ||
 			         child->type == LogicalOperatorType::LOGICAL_DELIM_JOIN) {
-				// for IN-clause optimization (MARK join), register FILTER as node
-				// the table_index comes from the join's left child
-				printf("[NODE_REG] Registering FILTER (child=JOIN) for table_idx=%llu, op=%p\n",
-					   table_mgr.GetScalarTableIndex(op), (void*)op);
-				table_mgr.AddTableOperator(op);
+			// for IN-clause optimization (MARK join), register FILTER as node
+			// the table_index comes from the join's left child
+			D_PRINTF("[NODE_REG] Registering FILTER (child=JOIN) for table_idx=%llu",
+			         (unsigned long long)table_mgr.GetScalarTableIndex(op));
+			table_mgr.AddTableOperator(op);
 				// still recurse into the join to collect join edges and other tables
 				ExtractOperatorsRecursive(*child, join_ops);
 				return;
@@ -136,15 +134,15 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 					ExtractOperatorsRecursive(*op->children[0], join_ops);
 					return;
 		}
-		case LogicalOperatorType::LOGICAL_DUMMY_SCAN:
-		case LogicalOperatorType::LOGICAL_EXPRESSION_GET:
-		case LogicalOperatorType::LOGICAL_DELIM_GET:
-		case LogicalOperatorType::LOGICAL_GET:
-		case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
-		case LogicalOperatorType::LOGICAL_CHUNK_GET:
-				printf("[NODE_REG] Registering base table scan, type=%d, op=%p\n", (int)op->type, (void*)op);
-				table_mgr.AddTableOperator(op);
-				return;
+	case LogicalOperatorType::LOGICAL_DUMMY_SCAN:
+	case LogicalOperatorType::LOGICAL_EXPRESSION_GET:
+	case LogicalOperatorType::LOGICAL_DELIM_GET:
+	case LogicalOperatorType::LOGICAL_GET:
+	case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
+	case LogicalOperatorType::LOGICAL_CHUNK_GET:
+			D_PRINTF("[NODE_REG] Registering base table scan, type=%d", (int)op->type);
+			table_mgr.AddTableOperator(op);
+			return;
 		default:
 				for (auto &child : op->children) {
 					ExtractOperatorsRecursive(*child, join_ops);
@@ -162,8 +160,8 @@ ColumnBinding RPTOptimizerContextState::ResolveColumnBinding(const ColumnBinding
 		size_t hash = std::hash<idx_t>()(current.table_index) ^ (std::hash<idx_t>()(current.column_index) << 1);
 		if (visited.count(hash)) {
 			// cycle detected, return current binding
-			printf("WARNING: Cycle detected in rename_col_bindings for binding (%llu.%llu)\n",
-				   current.table_index, current.column_index);
+		D_PRINTF("WARNING: Cycle detected in rename_col_bindings for binding (%llu.%llu)",
+		         (unsigned long long)current.table_index, (unsigned long long)current.column_index);
 			break;
 		}
 		visited.insert(hash);
@@ -219,8 +217,8 @@ vector<JoinEdge> RPTOptimizerContextState::CreateJoinEdges(vector<LogicalOperato
 				             resolved_left_columns.size(), join.join_type);
 				edges.push_back(edge);
 			} else {
-				printf("WARNING: Resolved table indices (%llu, %llu) not found in table_lookup\n",
-					   left_table_idx, right_table_idx);
+				D_PRINTF("WARNING: Resolved table indices (%llu, %llu) not found in table_lookup",
+				         (unsigned long long)left_table_idx, (unsigned long long)right_table_idx);
 			}
 		}
 	}
@@ -278,7 +276,7 @@ vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) 
 		}
 
 		if (!best_edge) {
-			printf("Warning - Disconnected components found. MST incomplete.\n");
+			D_PRINT("Warning - Disconnected components found. MST incomplete.");
 			break;
 		}
 
@@ -297,7 +295,7 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 	}
 
 	if (table_mgr.table_ops.empty()) {
-		printf("ERROR: BuildRootedTree called with empty table_ops\n");
+		D_PRINT("ERROR: BuildRootedTree called with empty table_ops");
 		return nullptr;
 	}
 
@@ -317,7 +315,7 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 	}
 
 	if (!found_root) {
-		printf("ERROR: No valid root table found\n");
+		D_PRINT("ERROR: No valid root table found");
 		return nullptr;
 	}
 
@@ -330,7 +328,7 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 
 	// verify root node was created
 	if (table_to_node.find(root_table_idx) == table_to_node.end() || !table_to_node[root_table_idx]) {
-		printf("ERROR: Failed to create root node for table %llu\n", root_table_idx);
+		D_PRINTF("ERROR: Failed to create root node for table %llu", (unsigned long long)root_table_idx);
 		// cleanup allocated nodes
 		for (auto &pair : table_to_node) {
 			delete pair.second;
@@ -359,7 +357,7 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 
 		// check if current node exists
 		if (table_to_node.find(current) == table_to_node.end() || !table_to_node[current]) {
-			printf("ERROR: Node for table %llu not found in table_to_node\n", current);
+			D_PRINTF("ERROR: Node for table %llu not found in table_to_node", (unsigned long long)current);
 			continue;
 		}
 
@@ -370,7 +368,7 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 			if (visited.count(neighbor_idx) == 0) {
 				// verify neighbor node exists
 				if (table_to_node.find(neighbor_idx) == table_to_node.end() || !table_to_node[neighbor_idx]) {
-					printf("ERROR: Child node for table %llu not found\n", neighbor_idx);
+					D_PRINTF("ERROR: Child node for table %llu not found", (unsigned long long)neighbor_idx);
 					continue;
 				}
 
@@ -391,11 +389,14 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 	return table_to_node[root_table_idx];
 }
 
-void RPTOptimizerContextState::DebugPrintGraph(const vector<JoinEdge> &edges) const {
+void RPTOptimizerContextState::DebugPrintGraph([[maybe_unused]] const vector<JoinEdge> &edges) const {
+#ifdef DEBUG
 	// Debug: Print all tables
-	printf("=== TABLE INFORMATION ===\n");
+	Printer::Print("=== TABLE INFORMATION ===");
 	for (const auto &table_info : table_mgr.table_ops) {
-		printf("Table %llu: cardinality=%llu\n", table_info.table_idx, table_info.estimated_cardinality);
+		Printer::PrintF("Table %llu: cardinality=%llu", 
+		                (unsigned long long)table_info.table_idx, 
+		                (unsigned long long)table_info.estimated_cardinality);
 	}
 
 	// Find largest table
@@ -407,66 +408,77 @@ void RPTOptimizerContextState::DebugPrintGraph(const vector<JoinEdge> &edges) co
 			largest_table_idx = table_info.table_idx;
 		}
 	}
-	printf("Largest table: %llu (cardinality=%llu)\n\n", largest_table_idx, max_cardinality);
+	Printer::PrintF("Largest table: %llu (cardinality=%llu)\n", 
+	                (unsigned long long)largest_table_idx, (unsigned long long)max_cardinality);
 
 	// Debug: Print all join edges
-	printf("=== ALL JOIN EDGES ===\n");
+	Printer::Print("=== ALL JOIN EDGES ===");
 	for (size_t i = 0; i < edges.size(); i++) {
 		const auto &edge = edges[i];
-		printf("Edge %zu: %llu <-> %llu (weight=%llu, type=%d)\n",
-				i, edge.table_a, edge.table_b, edge.weight, (int)edge.join_type);
+		Printer::PrintF("Edge %zu: %llu <-> %llu (weight=%llu, type=%d)",
+		                i, (unsigned long long)edge.table_a, (unsigned long long)edge.table_b, 
+		                (unsigned long long)edge.weight, (int)edge.join_type);
 
 		// Print column bindings
-		printf("  Columns A: ");
+		string cols_a = "  Columns A: ";
 		for (const auto &col : edge.join_columns_a) {
-			printf("(%llu.%llu) ", col.table_index, col.column_index);
+			cols_a += "(" + std::to_string(col.table_index) + "." + std::to_string(col.column_index) + ") ";
 		}
-		printf("\n  Columns B: ");
+		Printer::Print(cols_a);
+		
+		string cols_b = "  Columns B: ";
 		for (const auto &col : edge.join_columns_b) {
-			printf("(%llu.%llu) ", col.table_index, col.column_index);
+			cols_b += "(" + std::to_string(col.table_index) + "." + std::to_string(col.column_index) + ") ";
 		}
-		printf("\n");
+		Printer::Print(cols_b);
 	}
-	printf("\n");
+	Printer::Print("");
+#endif
 }
 
-void RPTOptimizerContextState::DebugPrintMST(const vector<JoinEdge> &mst_edges, const vector<BloomFilterOperation> &bf_operations) {
-	printf("=== MST EDGES ===\n");
+void RPTOptimizerContextState::DebugPrintMST([[maybe_unused]] const vector<JoinEdge> &mst_edges, 
+                                             [[maybe_unused]] const vector<BloomFilterOperation> &bf_operations) {
+#ifdef DEBUG
+	Printer::Print("=== MST EDGES ===");
 	for (size_t i = 0; i < mst_edges.size(); i++) {
 		const auto &edge = mst_edges[i];
-		printf("MST Edge %zu: %llu <-> %llu (weight=%llu)\n",
-			i, edge.table_a, edge.table_b, edge.weight);
+		Printer::PrintF("MST Edge %zu: %llu <-> %llu (weight=%llu)",
+		                i, (unsigned long long)edge.table_a, (unsigned long long)edge.table_b, 
+		                (unsigned long long)edge.weight);
 	}
-	printf("\n");
+	Printer::Print("");
 
-	printf("=== BLOOM FILTER OPERATIONS ===\n");
+	Printer::Print("=== BLOOM FILTER OPERATIONS ===");
 	for (size_t i = 0; i < bf_operations.size(); i++) {
 		const auto &bf_op = bf_operations[i];
 
 		if (bf_op.is_create) {
 			// CREATE operation
-			printf("BF Op %zu: CREATE_BF on table %llu\n", i, bf_op.build_table_idx);
-			printf("  Build columns: ");
+			Printer::PrintF("BF Op %zu: CREATE_BF on table %llu", i, (unsigned long long)bf_op.build_table_idx);
+			string cols = "  Build columns: ";
 			for (const auto &col : bf_op.build_columns) {
-				printf("(%llu.%llu) ", col.table_index, col.column_index);
+				cols += "(" + std::to_string(col.table_index) + "." + std::to_string(col.column_index) + ") ";
 			}
-			printf("\n");
+			Printer::Print(cols);
 		} else {
 			// USE operation
-			printf("BF Op %zu: USE_BF on table %llu (using BF from table %llu)\n",
-				   i, bf_op.probe_table_idx, bf_op.build_table_idx);
-			printf("  Build columns: ");
+			Printer::PrintF("BF Op %zu: USE_BF on table %llu (using BF from table %llu)",
+			                i, (unsigned long long)bf_op.probe_table_idx, (unsigned long long)bf_op.build_table_idx);
+			string build_cols = "  Build columns: ";
 			for (const auto &col : bf_op.build_columns) {
-				printf("(%llu.%llu) ", col.table_index, col.column_index);
+				build_cols += "(" + std::to_string(col.table_index) + "." + std::to_string(col.column_index) + ") ";
 			}
-			printf("\n  Probe columns: ");
+			Printer::Print(build_cols);
+			
+			string probe_cols = "  Probe columns: ";
 			for (const auto &col : bf_op.probe_columns) {
-				printf("(%llu.%llu) ", col.table_index, col.column_index);
+				probe_cols += "(" + std::to_string(col.table_index) + "." + std::to_string(col.column_index) + ") ";
 			}
-			printf("\n");
+			Printer::Print(probe_cols);
 		}
 	}
-	printf("\n");
+	Printer::Print("");
+#endif
 }
 
 std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
@@ -478,7 +490,7 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 
 	// check if tree building failed
 	if (!root) {
-		printf("ERROR: BuildRootedTree returned nullptr, returning empty modifications\n");
+		D_PRINT("ERROR: BuildRootedTree returned nullptr, returning empty modifications");
 		return {{}, {}};
 	}
 
@@ -494,7 +506,7 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 	while (front < queue.size()) {
 		TreeNode* node = queue[front++];
 		if (!node) {
-			printf("ERROR: Null node encountered during BFS\n");
+			D_PRINT("ERROR: Null node encountered during BFS");
 			continue;
 		}
 
@@ -505,7 +517,7 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			if (child) {
 				queue.push_back(child);
 			} else {
-				printf("ERROR: Null child node encountered\n");
+				D_PRINT("ERROR: Null child node encountered");
 			}
 		}
 	}
@@ -521,19 +533,20 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 	for (int level = max_level; level >= 1; level--) {
 		for (TreeNode* child_node : nodes_by_level[level]) {
 			if (!child_node) {
-				printf("ERROR: Null child_node at level %d\n", level);
+				D_PRINTF("ERROR: Null child_node at level %d", level);
 				continue;
 			}
 
 			TreeNode* parent_node = child_node->parent;
 			if (!parent_node) {
-				printf("ERROR: Null parent_node for table %llu at level %d\n", child_node->table_idx, level);
+				D_PRINTF("ERROR: Null parent_node for table %llu at level %d", 
+				         (unsigned long long)child_node->table_idx, level);
 				continue;
 			}
 
 			JoinEdge* edge = child_node->edge_to_parent;
 			if (!edge) {
-				printf("ERROR: Null edge_to_parent for table %llu\n", child_node->table_idx);
+				D_PRINTF("ERROR: Null edge_to_parent for table %llu", (unsigned long long)child_node->table_idx);
 				continue;
 			}
 
@@ -569,26 +582,26 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			forward_bf_ops[parent_node->table_op].push_back(use_op);
 		}
 	}
-	printf("\n");
 
 	// step 4: backward pass - top-down (root to leaves)
 	// process levels from 1 to max_level
 	for (int level = 1; level <= max_level; level++) {
 		for (TreeNode* child_node : nodes_by_level[level]) {
 			if (!child_node) {
-				printf("ERROR: Null child_node at level %d\n", level);
+				D_PRINTF("ERROR: Null child_node at level %d", level);
 				continue;
 			}
 
 			TreeNode* parent_node = child_node->parent;
 			if (!parent_node) {
-				printf("ERROR: Null parent_node for table %llu at level %d\n", child_node->table_idx, level);
+				D_PRINTF("ERROR: Null parent_node for table %llu at level %d", 
+				         (unsigned long long)child_node->table_idx, level);
 				continue;
 			}
 
 			JoinEdge* edge = child_node->edge_to_parent;
 			if (!edge) {
-				printf("ERROR: Null edge_to_parent for table %llu\n", child_node->table_idx);
+				D_PRINTF("ERROR: Null edge_to_parent for table %llu", (unsigned long long)child_node->table_idx);
 				continue;
 			}
 
@@ -624,7 +637,6 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			backward_bf_ops[child_node->table_op].push_back(use_op);
 		}
 	}
-	printf("\n");
 
 	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
 }
@@ -830,8 +842,8 @@ void RPTOptimizerContextState::LinkUseBFToCreateBF(LogicalOperator *plan) {
 					use_bf->related_create_bf = it->second;
 					it->second->related_use_bf.push_back(use_bf);
 				} else {
-					printf("[LINK] WARNING: No matching CREATE_BF found for USE_BF (probe=table_%llu, build=table_%llu)\n",
-						   use_bf->bf_operation.probe_table_idx, build_table_idx);
+					D_PRINTF("[LINK] WARNING: No matching CREATE_BF found for USE_BF (probe=table_%llu, build=table_%llu)",
+					         (unsigned long long)use_bf->bf_operation.probe_table_idx, (unsigned long long)build_table_idx);
 				}
 			}
 		}
@@ -856,7 +868,7 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	// step 1: extract join operators
 	vector<JoinEdge> edges = ExtractOperators(*plan);
 
-	printf("Edges size: %lu\n", edges.size());
+	D_PRINTF("Edges size: %zu", edges.size());
 	if (edges.size() <= 1) {
 		return plan;
 	}

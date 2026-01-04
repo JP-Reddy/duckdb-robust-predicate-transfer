@@ -4,6 +4,7 @@
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parallel/pipeline.hpp"
 #include "duckdb/parallel/base_pipeline_event.hpp"
+#include "debug_utils.hpp"
 #include <iostream>
 #include <unordered_set>
 #include <duckdb/parallel/meta_pipeline.hpp>
@@ -150,14 +151,14 @@ public:
 	void FinishEvent() override {
 		// mark all bloom filters as finalized after parallel building completes
 		string build_table = sink.op.bf_operation ? "table_" + std::to_string(sink.op.bf_operation->build_table_idx) : "unknown";
-		printf("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters\n",
-			build_table.c_str(), sink.op.bloom_filter_map.size());
+		D_PRINTF("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters",
+		         build_table.c_str(), sink.op.bloom_filter_map.size());
 
 		for (auto &[col, bf] : sink.op.bloom_filter_map) {
 			if (bf) {
 				bf->finalized_ = true;
-				printf("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) marked as finalized\n",
-					build_table.c_str(), col.table_index, col.column_index);
+				D_PRINTF("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) marked as finalized",
+				         build_table.c_str(), (unsigned long long)col.table_index, (unsigned long long)col.column_index);
 			}
 		}
 	}
@@ -186,10 +187,8 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 
 	// print total data size
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	printf("[FINALIZE] CREATE_BF (build=%s, this=%p): total_data contains %llu rows\n",
-		   build_table.c_str(), (void*)this, gsink.total_data->Count());
-	// printf("[FINALIZE] total_data: \n");
-	// gsink.total_data->Print();
+	D_PRINTF("[FINALIZE] CREATE_BF (build=%s): total_data contains %llu rows",
+	         build_table.c_str(), (unsigned long long)gsink.total_data->Count());
 
 	gsink.local_data_collections.clear();
 
@@ -264,9 +263,11 @@ unique_ptr<GlobalSourceState> PhysicalCreateBF::GetGlobalSourceState(ClientConte
 	auto chunk_count = gsink.total_data->ChunkCount();
 	auto row_count = gsink.total_data->Count();
 
+#ifdef DEBUG
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 	Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) GetGlobalSourceState: chunk_count=%llu, row_count=%llu",
-		build_table.c_str(), chunk_count, row_count));
+		build_table.c_str(), (unsigned long long)chunk_count, (unsigned long long)row_count));
+#endif
 
 	const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
 	auto chunks_per_thread = MaxValue<idx_t>((chunk_count + num_threads - 1) / num_threads, 1);
@@ -278,8 +279,10 @@ unique_ptr<GlobalSourceState> PhysicalCreateBF::GetGlobalSourceState(ClientConte
 		auto chunk_idx_from = chunk_idx;
 		auto chunk_idx_to = MinValue<idx_t>(chunk_idx_from + chunks_per_thread, chunk_count);
 		state->chunks_todo.emplace_back(chunk_idx_from, chunk_idx_to);
+#ifdef DEBUG
 		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Partition %llu: chunks [%llu, %llu)",
-			build_table.c_str(), thread_idx, chunk_idx_from, chunk_idx_to));
+			build_table.c_str(), (unsigned long long)thread_idx, (unsigned long long)chunk_idx_from, (unsigned long long)chunk_idx_to));
+#endif
 		chunk_idx = chunk_idx_to;
 	}
 	return unique_ptr_cast<CreateBFGlobalSourceState, GlobalSourceState>(std::move(state));
@@ -297,48 +300,41 @@ SourceResultType PhysicalCreateBF::GetData(ExecutionContext &context, DataChunk 
 	auto &lstate = input.local_state.Cast<CreateBFLocalSourceState>();
 	auto &state = input.global_state.Cast<CreateBFGlobalSourceState>();
 
+#ifdef DEBUG
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	// Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) GetData start: partition_id=%llu, chunks_todo.size()=%zu, local_current_chunk_id=%zu\n",
-	// 			build_table.c_str(), lstate.local_partition_id, state.chunks_todo.size(), lstate.local_current_chunk_id));
+#endif
+
 	if(lstate.initial) {
 		lstate.local_partition_id = state.partition_id++;
 		lstate.initial = false;
 
+#ifdef DEBUG
 		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) GetData initial: partition_id=%llu, chunks_todo.size()=%zu",
-			build_table.c_str(), lstate.local_partition_id, state.chunks_todo.size()));
+			build_table.c_str(), (unsigned long long)lstate.local_partition_id, state.chunks_todo.size()));
+#endif
 
 		if (lstate.local_partition_id >= state.chunks_todo.size()) {
-			Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) No more partitions, returning FINISHED", build_table.c_str()));
+			D_PRINTF("[SOURCE] CREATE_BF No more partitions, returning FINISHED");
 			return SourceResultType::FINISHED;
 		}
 		lstate.chunk_from = state.chunks_todo[lstate.local_partition_id].first;
 		lstate.chunk_to = state.chunks_todo[lstate.local_partition_id].second;
 
+#ifdef DEBUG
 		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Assigned range: [%llu, %llu)",
-			build_table.c_str(), lstate.chunk_from, lstate.chunk_to));
+			build_table.c_str(), (unsigned long long)lstate.chunk_from, (unsigned long long)lstate.chunk_to));
+#endif
 	}
 
 	auto chunk_count = gstate.total_data->ChunkCount();
 
 	if (lstate.local_current_chunk_id >= chunk_count) {
-		// Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) ERROR: trying to fetch chunk_id=%llu but chunk_count=%llu",
-		// 	build_table.c_str(), lstate.local_current_chunk_id, chunk_count));
-		// throw InternalException("CREATE_BF GetData: chunk_id out of bounds");
 		return SourceResultType::FINISHED;
 	}
 
 	if (lstate.local_current_chunk_id == 0) {
 		lstate.local_current_chunk_id = lstate.chunk_from;
-	// } else if(lstate.local_current_chunk_id >= lstate.chunk_to) {
-	// 	Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Partition exhausted (chunk_id=%llu >= chunk_to=%llu), returning FINISHED",
-	// 		build_table.c_str(), lstate.local_current_chunk_id, lstate.chunk_to));
-	// 	// lstate.local_current_chunk_id++;
-	// 	return SourceResultType::HAVE_MORE_OUTPUT;
 	}
-	// else if ()
-
-	// Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Fetching chunk %llu (total chunks=%llu)",
-	// 	build_table.c_str(), lstate.local_current_chunk_id, chunk_count));
 
 	gstate.total_data->FetchChunk(lstate.local_current_chunk_id++, chunk);
 	return SourceResultType::HAVE_MORE_OUTPUT;
@@ -348,10 +344,9 @@ void PhysicalCreateBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipe
 	op_state.reset();
 	sink_state.reset();
 
+#ifdef DEBUG
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	char ptr_str[32];
-	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
-	// Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelines called", build_table.c_str(), ptr_str));
+#endif
 
 	auto &state = meta_pipeline.GetState();
 
@@ -359,14 +354,14 @@ void PhysicalCreateBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipe
 	state.SetPipelineSource(current, *this);
 
 	if (this_pipeline == nullptr) {
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) creating NEW child pipeline for build-side", build_table.c_str()));
+		D_PRINTF("[PIPELINE] CREATE_BF (build=%s) creating NEW child pipeline for build-side", build_table.c_str());
 		auto &child_meta_pipeline = meta_pipeline.CreateChildMetaPipeline(current, *this);
 		this_pipeline = child_meta_pipeline.GetBasePipeline();
 		// CreateChildMetaPipeline() automatically registers the child pipeline as a dependency
 		child_meta_pipeline.Build(children[0].get());
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) child pipeline created", build_table.c_str()));
+		D_PRINTF("[PIPELINE] CREATE_BF (build=%s) child pipeline created", build_table.c_str());
 	} else {
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s) adding existing child pipeline as dependency", build_table.c_str()));
+		D_PRINTF("[PIPELINE] CREATE_BF (build=%s) adding existing child pipeline as dependency", build_table.c_str());
 		current.AddDependency(this_pipeline);
 	}
 
@@ -379,23 +374,27 @@ void PhysicalCreateBF::BuildPipelinesFromRelated(Pipeline &current,
 	auto &state = meta_pipeline.GetState();
 	D_ASSERT(children.size() == 1);
 
+#ifdef DEBUG
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 	char ptr_str[32];
 	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
 	Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelinesFromRelated - USE_BF needs this filter", build_table.c_str(), ptr_str));
+#endif
 
 	if (this_pipeline == nullptr) {
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) creating NEW child pipeline from BuildPipelinesFromRelated", build_table.c_str(), ptr_str));
+		D_PRINTF("[PIPELINE] CREATE_BF creating NEW child pipeline from BuildPipelinesFromRelated");
 		auto &child_meta_pipeline = meta_pipeline.CreateChildMetaPipeline(current, *this);
 		this_pipeline = child_meta_pipeline.GetBasePipeline();
 		child_meta_pipeline.Build(children[0].get());
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) child pipeline created and dependency added automatically", build_table.c_str(), ptr_str));
+		D_PRINT("[PIPELINE] CREATE_BF child pipeline created and dependency added automatically");
 	} else {
-		Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) adding existing pipeline as dependency", build_table.c_str(), ptr_str));
+		D_PRINT("[PIPELINE] CREATE_BF adding existing pipeline as dependency");
 		current.AddDependency(this_pipeline);
 	}
 
+#ifdef DEBUG
 	this_pipeline->Print();
+#endif
 }
 
 } // namespace duckdb
