@@ -36,6 +36,9 @@ public:
 		return true;
 	}
 
+	bool ParallelSink() const override {
+		return true;
+	}
 	// source interface
 	unique_ptr<GlobalSourceState> GetGlobalSourceState(ClientContext &context) const override;
 	unique_ptr<LocalSourceState> GetLocalSourceState(ExecutionContext &context,
@@ -44,6 +47,10 @@ public:
 				OperatorSourceInput &input) const override;
 
 	bool IsSource() const override {
+		return true;
+	}
+
+	bool ParallelSource() const override {
 		return true;
 	}
 
