@@ -52,15 +52,32 @@ static void LoadInternal(DatabaseInstance &instance) {
 	optimizer.optimize_function = RPTOptimizerContextState::Optimize;
 	// optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
 	instance.config.optimizer_extensions.push_back(optimizer);
-	
+
 	// Register logical operators
 	instance.config.operator_extensions.push_back(make_uniq<CreateBFOperatorExtension>());
 	instance.config.operator_extensions.push_back(make_uniq<UseBFOperatorExtension>());
 }
 
-void RptExtension::Load(DuckDB &db) {
-	LoadInternal(*db.instance);
+static void LoadInternal(ExtensionLoader &loader) {
+	// Register the SIP optimizer rule
+	OptimizerExtension optimizer;
+	// optimizer.optimize_function = PredicateTransferOptimizer::Optimize;
+	// optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
+	// optimizer.pre_optimize_function = RPTOptimizerContextState::PreOptimize;
+	optimizer.optimize_function = RPTOptimizerContextState::Optimize;
+	// optimizer.pre_optimize_function = PredicateTransferOptimizer::PreOptimize;
+
+	DatabaseInstance &instance = loader.GetDatabaseInstance();
+	instance.config.optimizer_extensions.push_back(optimizer);
+
+	// Register logical operators
+	instance.config.operator_extensions.push_back(make_uniq<CreateBFOperatorExtension>());
+	instance.config.operator_extensions.push_back(make_uniq<UseBFOperatorExtension>());
 }
+
+// void RptExtension::Load(DuckDB &db) {
+// 	LoadInternal(*db.instance);
+// }
 std::string RptExtension::Name() {
 	return "rpt";
 }
@@ -77,9 +94,13 @@ std::string RptExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void rpt_init(duckdb::DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	db_wrapper.LoadExtension<duckdb::RptExtension>();
+// DUCKDB_EXTENSION_API void rpt_init(duckdb::DatabaseInstance &db) {
+// 	duckdb::DuckDB db_wrapper(db);
+// 	db_wrapper.LoadExtension<duckdb::RptExtension>();
+// }
+
+DUCKDB_CPP_EXTENSION_ENTRY(vss, loader) {
+	duckdb::LoadInternal(loader);
 }
 
 DUCKDB_EXTENSION_API const char *rpt_version() {
