@@ -5,7 +5,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
-#include "duckdb/main/extension_util.hpp"
+// #include "duckdb/main/extension_util.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include "duckdb/optimizer/optimizer_extension.hpp"
 #include "duckdb/planner/operator_extension.hpp"
@@ -99,7 +99,7 @@ extern "C" {
 // 	db_wrapper.LoadExtension<duckdb::RptExtension>();
 // }
 
-DUCKDB_CPP_EXTENSION_ENTRY(vss, loader) {
+DUCKDB_CPP_EXTENSION_ENTRY(rpt, loader) {
 	duckdb::LoadInternal(loader);
 }
 

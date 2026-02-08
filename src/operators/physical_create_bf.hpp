@@ -14,7 +14,7 @@ public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 public:
-	PhysicalCreateBF(const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
+	PhysicalCreateBF(PhysicalPlan &physical_plan, const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
 	                 idx_t estimated_cardinality, vector<idx_t> bound_column_indices);
 
 	// Required virtual methods

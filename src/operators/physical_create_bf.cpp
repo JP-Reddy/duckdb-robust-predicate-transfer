@@ -12,9 +12,9 @@
 
 namespace duckdb {
 
-PhysicalCreateBF::PhysicalCreateBF(const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
+PhysicalCreateBF::PhysicalCreateBF(PhysicalPlan &physical_plan, const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
                                    idx_t estimated_cardinality, vector<idx_t> bound_column_indices)
-    : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       bf_operation(bf_operation), is_probing_side(false), bound_column_indices(std::move(bound_column_indices)) {
 	// create bloom filter for each build column, keyed by ColumnBinding
 	for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {

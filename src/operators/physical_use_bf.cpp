@@ -8,9 +8,9 @@
 
 namespace duckdb {
 
-PhysicalUseBF::PhysicalUseBF(shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
+PhysicalUseBF::PhysicalUseBF(PhysicalPlan &physical_plan, shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
                              idx_t estimated_cardinality, vector<idx_t> bound_column_indices)
-    : CachingPhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
+    : CachingPhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       bf_operation(std::move(bf_operation)), bound_column_indices(std::move(bound_column_indices)) {
 }
 
