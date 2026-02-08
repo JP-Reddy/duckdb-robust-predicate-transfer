@@ -305,7 +305,7 @@ SourceResultType PhysicalCreateBF::GetData(ExecutionContext &context, DataChunk 
 #endif
 
 	if(lstate.initial) {
-		lstate.local_partition_id = state.partition_id++;
+		lstate.local_partition_id = state.partition_id.fetch_add(1);
 		lstate.initial = false;
 
 #ifdef DEBUG
@@ -320,22 +320,34 @@ SourceResultType PhysicalCreateBF::GetData(ExecutionContext &context, DataChunk 
 		lstate.chunk_from = state.chunks_todo[lstate.local_partition_id].first;
 		lstate.chunk_to = state.chunks_todo[lstate.local_partition_id].second;
 
+		// parallel source
+		lstate.local_current_chunk_id = lstate.chunk_from;
+
 #ifdef DEBUG
 		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Assigned range: [%llu, %llu)",
 			build_table.c_str(), (unsigned long long)lstate.chunk_from, (unsigned long long)lstate.chunk_to));
 #endif
 	}
 
-	auto chunk_count = gstate.total_data->ChunkCount();
+	// sequential source
+	// auto chunk_count = gstate.total_data->ChunkCount();
+	//
+	// if (lstate.local_current_chunk_id >= chunk_count) {
+	// 	return SourceResultType::FINISHED;
+	// }
+	//
+	// if (lstate.local_current_chunk_id == 0) {
+	// 	lstate.local_current_chunk_id = lstate.chunk_from;
+	// }
 
-	if (lstate.local_current_chunk_id >= chunk_count) {
-		return SourceResultType::FINISHED;
+	// parallel source
+	{
+		// auto chunk_count = gstate.total_data->ChunkCount();
+
+		if (lstate.local_current_chunk_id >= lstate.chunk_to) {
+			return SourceResultType::FINISHED;
+		}
 	}
-
-	if (lstate.local_current_chunk_id == 0) {
-		lstate.local_current_chunk_id = lstate.chunk_from;
-	}
-
 	gstate.total_data->FetchChunk(lstate.local_current_chunk_id++, chunk);
 	return SourceResultType::HAVE_MORE_OUTPUT;
 }
