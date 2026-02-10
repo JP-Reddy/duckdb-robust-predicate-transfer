@@ -70,7 +70,10 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 		// step 1: get child column bindings to understand chunk schema
 		vector<ColumnBinding> child_bindings = children[0]->GetColumnBindings();
 
-		// step 2: resolve/map the bf operation columns to chunk column indices
+		// step 2: resolve/map the bf operation columns to chunk column indices.
+		// resolved_indices stores the columns on which the bloom filters are
+		// built.
+		// TODO: optimize: Use a map for bf_operation.build_columns to speed up lookup
 		vector<idx_t> resolved_indices;
 		for (const ColumnBinding &column_binding: bf_operation.build_columns) {
 			// find the position of the bf column ColumnBinding in the chunk columns
@@ -101,6 +104,8 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 		// the links are used to create pipeline dependencies
 		for (const LogicalUseBF *use_bf : related_use_bf) {
 			if (use_bf->physical) {
+				// TODO: keep either related_create_bf or related_create_bf_vec. Not both. Most likely we'll have to
+				// remove related_create_bf.
 				use_bf->physical->related_create_bf = physical;
 				use_bf->physical->related_create_bf_vec.push_back(physical);
 				// string probe_table = "table_" + std::to_string(use_bf->bf_operation.probe_table_idx);

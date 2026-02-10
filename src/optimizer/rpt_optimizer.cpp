@@ -86,7 +86,7 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 			         (unsigned long long)table_mgr.GetScalarTableIndex(op));
 			table_mgr.AddTableOperator(op);
 				// still recurse into the join to collect join edges and other tables
-				ExtractOperatorsRecursive(*child, join_ops);
+				// ExtractOperatorsRecursive(*child, join_ops);
 				return;
 			}
 
@@ -886,23 +886,23 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	// step 5: link USE_BF operators to their corresponding CREATE_BF operators
 	LinkUseBFToCreateBF(plan.get());
 
-	// combine all bloom filter operations for debug (preserving order)
-	vector<BloomFilterOperation> all_bf_operations;
-	for (const auto &pair : bf_ops.first) {
-		all_bf_operations.insert(all_bf_operations.end(), pair.second.begin(), pair.second.end());
-	}
-	for (const auto &pair : bf_ops.second) {
-		all_bf_operations.insert(all_bf_operations.end(), pair.second.begin(), pair.second.end());
-	}
-
-	// sort by sequence number to restore generation order
-	std::sort(all_bf_operations.begin(), all_bf_operations.end(),
-		[](const BloomFilterOperation &a, const BloomFilterOperation &b) {
-			return a.sequence_number < b.sequence_number;
-		});
-
-	// debug print with correct ordering
-	DebugPrintMST(mst_edges, all_bf_operations);
+	// // combine all bloom filter operations for debug (preserving order)
+	// vector<BloomFilterOperation> all_bf_operations;
+	// for (const auto &pair : bf_ops.first) {
+	// 	all_bf_operations.insert(all_bf_operations.end(), pair.second.begin(), pair.second.end());
+	// }
+	// for (const auto &pair : bf_ops.second) {
+	// 	all_bf_operations.insert(all_bf_operations.end(), pair.second.begin(), pair.second.end());
+	// }
+	//
+	// // sort by sequence number to restore generation order
+	// std::sort(all_bf_operations.begin(), all_bf_operations.end(),
+	// 	[](const BloomFilterOperation &a, const BloomFilterOperation &b) {
+	// 		return a.sequence_number < b.sequence_number;
+	// 	});
+	//
+	// // debug print with correct ordering
+	// DebugPrintMST(mst_edges, all_bf_operations);
 	return plan;
 }
 
