@@ -5,6 +5,7 @@
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/parallel/meta_pipeline.hpp"
 #include "debug_utils.hpp"
+#include "rpt_profiling.hpp"
 
 namespace duckdb {
 
@@ -32,8 +33,16 @@ unique_ptr<OperatorState> PhysicalUseBF::GetOperatorState(ExecutionContext &cont
 
 OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
                                                   GlobalOperatorState &gstate, OperatorState &state_p) const {
+	if (!profiling_checked) {
+		profiling_checked = true;
+		auto prof = GetRPTProfilingState(context.client);
+		if (prof) {
+			profiling_stats = prof->RegisterUseBF(
+			    bf_operation->build_table_idx, bf_operation->probe_table_idx);
+		}
+	}
+
 	string table_name = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
-	// printf("[EXEC_INTERNAL] USE_BF (probe=%s, this=%p) called with %llu input rows\n", table_name.c_str(), (void*)this, input.size());
 
 	auto &bf_state = state_p.Cast<PhysicalUseBFState>();
 
@@ -69,15 +78,26 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 
 	// if no bloom filters or no input, just pass through
 	if (bf_state.bloom_filters.empty() || row_num == 0) {
-		D_PRINTF("[EXEC_INTERNAL] USE_BF (probe=%s) No bloom filter input/empty, row_num = %llu", 
+		D_PRINTF("[EXEC_INTERNAL] USE_BF (probe=%s) No bloom filter input/empty, row_num = %llu",
 		         table_name.c_str(), (unsigned long long)row_num);
+		if (profiling_stats) {
+			profiling_stats->rows_in.fetch_add(row_num, std::memory_order_relaxed);
+			profiling_stats->rows_out.fetch_add(row_num, std::memory_order_relaxed);
+		}
 		chunk.Reference(input);
 		return OperatorResultType::NEED_MORE_INPUT;
 	}
 
+	idx_t original_row_num = row_num;
+
 	// apply bloom filters
 	idx_t result_count = row_num;
 	SelectionVector sel(STANDARD_VECTOR_SIZE);
+
+	unique_ptr<ScopedTimer> probe_timer;
+	if (profiling_stats) {
+		probe_timer = make_uniq<ScopedTimer>(profiling_stats->probe_time_us);
+	}
 
 	for (int i = 0; i < bf_state.bloom_filters.size(); i++) {
 		auto bf = bf_state.bloom_filters[i];
@@ -91,6 +111,10 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 			string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 			D_PRINTF("Bloom filter empty for %s", build_table.c_str());
 			// empty filter means no matches possible
+			probe_timer.reset();
+			if (profiling_stats) {
+				profiling_stats->rows_in.fetch_add(original_row_num, std::memory_order_relaxed);
+			}
 			chunk.SetCardinality(0);
 			return OperatorResultType::NEED_MORE_INPUT;
 		}
@@ -165,7 +189,10 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 
 		// early exit if no rows passed
 		if (result_count == 0) {
-			// printf("[EXEC_INTERNAL] USE_BF (probe=%s, this=%p) Result count = 0\n", table_name.c_str(), (void*)this);
+			probe_timer.reset();
+			if (profiling_stats) {
+				profiling_stats->rows_in.fetch_add(original_row_num, std::memory_order_relaxed);
+			}
 			chunk.SetCardinality(0);
 			return OperatorResultType::NEED_MORE_INPUT;
 		}
@@ -177,6 +204,9 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		}
 	}
 
+	// stop probe timer before output work
+	probe_timer.reset();
+
 	// optimization: if all rows passed, just reference input (zero-copy)
 	if (result_count == row_num) {
 		chunk.Reference(input);
@@ -184,10 +214,11 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		chunk.Slice(input, sel, result_count);
 	}
 
-	// string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
-	// string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	// D_PRINTF("[EXECUTE] USE_BF (probe=%s, build=%s) Selected %llu rows",
-	//          probe_table.c_str(), build_table.c_str(), (unsigned long long)result_count);
+	if (profiling_stats) {
+		profiling_stats->rows_in.fetch_add(original_row_num, std::memory_order_relaxed);
+		profiling_stats->rows_out.fetch_add(result_count, std::memory_order_relaxed);
+	}
+
 	return OperatorResultType::NEED_MORE_INPUT;
 }
 

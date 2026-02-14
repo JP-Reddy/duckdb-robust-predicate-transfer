@@ -6,6 +6,8 @@
 #include "bloom_filter.hpp"
 
 namespace duckdb {
+
+struct UseBFStats;
 class PhysicalCreateBF;
 
 class PhysicalUseBFState : public CachingOperatorState {
@@ -54,6 +56,10 @@ public:
 	// references to related CREATE_BF operators
 	vector<PhysicalCreateBF*> related_create_bf_vec;
 	mutable PhysicalCreateBF *related_create_bf = nullptr;
+
+	// profiling
+	mutable shared_ptr<UseBFStats> profiling_stats;
+	mutable bool profiling_checked = false;
 };
 
 } // namespace duckdb

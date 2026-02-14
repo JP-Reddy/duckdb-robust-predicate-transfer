@@ -6,7 +6,10 @@
 #include "../optimizer/graph_manager.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include <duckdb/common/types/column/column_data_scan_states.hpp>
+
 namespace duckdb {
+
+struct CreateBFStats;
 
 
 class PhysicalCreateBF : public PhysicalOperator {
@@ -73,6 +76,10 @@ public:
 
 	// lookup bloom filter by the column it was built on
 	shared_ptr<BloomFilter> GetBloomFilter(const ColumnBinding &col) const;
+
+	// profiling
+	mutable shared_ptr<CreateBFStats> profiling_stats;
+	mutable bool profiling_checked = false;
 };
 
 class CreateBFLocalSinkState : public LocalSinkState {

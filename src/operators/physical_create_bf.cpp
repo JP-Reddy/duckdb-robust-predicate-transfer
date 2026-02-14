@@ -5,6 +5,7 @@
 #include "duckdb/parallel/pipeline.hpp"
 #include "duckdb/parallel/base_pipeline_event.hpp"
 #include "debug_utils.hpp"
+#include "rpt_profiling.hpp"
 #include <iostream>
 #include <unordered_set>
 #include <duckdb/parallel/meta_pipeline.hpp>
@@ -50,12 +51,24 @@ CreateBFGlobalSinkState::CreateBFGlobalSinkState(ClientContext &context, const P
 
 
 SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
+	if (!profiling_checked) {
+		profiling_checked = true;
+		auto prof = GetRPTProfilingState(context.client);
+		if (prof) {
+			profiling_stats = prof->RegisterCreateBF(
+			    bf_operation->build_table_idx, bf_operation->probe_table_idx);
+		}
+	}
+
 	CreateBFLocalSinkState &local_state = input.local_state.Cast<CreateBFLocalSinkState>();
-
-	// string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	// printf("[SINK] CREATE_BF (build=%s, this=%p): Received chunk with %llu rows\n", build_table.c_str(), (void*)this, chunk.size());
-
-	local_state.local_data->Append(chunk);
+	if (profiling_stats) {
+		ScopedTimer timer(profiling_stats->sink_time_us);
+		profiling_stats->rows_materialized.fetch_add(chunk.size(), std::memory_order_relaxed);
+		local_state.local_data->Append(chunk);
+	}
+	else {
+		local_state.local_data->Append(chunk);
+	}
 	return SinkResultType::NEED_MORE_INPUT;
 }
 
@@ -174,18 +187,33 @@ void CreateBFGlobalSinkState::ScheduleFinalize(Pipeline &pipeline, Event &event)
 
 SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
                                             OperatorSinkFinalizeInput &input) const {
+	// lazy init profiling if Sink was never called (e.g., empty input)
+	if (!profiling_checked) {
+		profiling_checked = true;
+		auto prof = GetRPTProfilingState(context);
+		if (prof) {
+			profiling_stats = prof->RegisterCreateBF(
+			    bf_operation->build_table_idx, bf_operation->probe_table_idx);
+		}
+	}
+
 	ThreadContext tcontext(context);
 	tcontext.profiler.StartOperator(this);
 	auto &gsink = input.global_state.Cast<CreateBFGlobalSinkState>();
 	int64_t num_rows = 0;
 	const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
 
+	// time the finalize phase (merge + BF init + schedule)
+	unique_ptr<ScopedTimer> fin_timer;
+	if (profiling_stats) {
+		fin_timer = make_uniq<ScopedTimer>(profiling_stats->finalize_time_us);
+	}
+
 	// 1. merge local data collections
 	for (auto &local_data : gsink.local_data_collections) {
 		gsink.total_data->Combine(*local_data);
 	}
 
-	// print total data size
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 	D_PRINTF("[FINALIZE] CREATE_BF (build=%s): total_data contains %llu rows",
 	         build_table.c_str(), (unsigned long long)gsink.total_data->Count());
@@ -348,7 +376,12 @@ SourceResultType PhysicalCreateBF::GetData(ExecutionContext &context, DataChunk 
 			return SourceResultType::FINISHED;
 		}
 	}
-	gstate.total_data->FetchChunk(lstate.local_current_chunk_id++, chunk);
+	if (profiling_stats) {
+		ScopedTimer timer(profiling_stats->source_time_us);
+		gstate.total_data->FetchChunk(lstate.local_current_chunk_id++, chunk);
+	} else {
+		gstate.total_data->FetchChunk(lstate.local_current_chunk_id++, chunk);
+	}
 	return SourceResultType::HAVE_MORE_OUTPUT;
 }
 

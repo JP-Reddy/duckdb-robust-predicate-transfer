@@ -13,6 +13,8 @@
 #include "../operators/logical_create_bf.hpp"
 #include "../operators/logical_use_bf.hpp"
 #include "debug_utils.hpp"
+#include "rpt_profiling.hpp"
+#include <chrono>
 
 namespace duckdb {
 // class LogicalCreateBF;
@@ -72,7 +74,7 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 		case LogicalOperatorType::LOGICAL_FILTER: {
 			LogicalOperator *child = op->children[0].get();
 			if(child->type == LogicalOperatorType::LOGICAL_GET) {
-			// register FILTER as node (not GET) - like reference impl
+			// register FILTER as node (not GET)
 			D_PRINTF("[NODE_REG] Registering FILTER (child=GET) for table_idx=%llu",
 			         (unsigned long long)table_mgr.GetScalarTableIndex(op));
 			table_mgr.AddTableOperator(op);
@@ -277,6 +279,7 @@ vector<JoinEdge> RPTOptimizerContextState::LargestRoot(vector<JoinEdge> &edges) 
 
 		if (!best_edge) {
 			D_PRINT("Warning - Disconnected components found. MST incomplete.");
+			// TODO: Add Assertion
 			break;
 		}
 
@@ -925,16 +928,22 @@ void RPTOptimizerContextState::PreOptimize(OptimizerExtensionInput &input, uniqu
 
 
 void RPTOptimizerContextState::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
-	// retrieve the optimizer state from ClientContext
-	const auto optimizer_state = input.context.registered_state->GetOrCreate<RPTOptimizerContextState>("rpt_optimizer_state", input.context);
-	// if (!optimizer_state) {
-	// 	optimizer_state = input.context.registered_state->GetOrCreate<PredicateTransferOptimizer>(
-	// 		"rpt_optimizer_state", input.context);
-	// }
+	auto profiling = GetRPTProfilingState(input.context);
+	auto opt_start = std::chrono::high_resolution_clock::now();
 
+	Printer::Print("\n=== LOGICAL PLAN BEFORE RPT ===");
+	Printer::Print(plan->ToString());
+	Printer::Print("=== END LOGICAL PLAN ===\n");
+
+	const auto optimizer_state = input.context.registered_state->GetOrCreate<RPTOptimizerContextState>("rpt_optimizer_state", input.context);
 	plan = optimizer_state->Optimize(std::move(plan));
 
-	// cleanup
+	if (profiling) {
+		auto opt_end = std::chrono::high_resolution_clock::now();
+		profiling->optimizer_time_us =
+		    std::chrono::duration_cast<std::chrono::microseconds>(opt_end - opt_start).count();
+	}
+
 	input.context.registered_state->Remove("rpt_optimizer_state");
 }
 
