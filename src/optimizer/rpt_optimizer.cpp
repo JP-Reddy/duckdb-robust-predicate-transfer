@@ -531,6 +531,14 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 	// sequence counter to preserve operation order
 	idx_t sequence = 0;
 
+	// sort nodes at each level by cardinality ascending so USE_BFs are generated smallest-first
+	for (int level = 1; level <= max_level; level++) {
+		std::sort(nodes_by_level[level].begin(), nodes_by_level[level].end(),
+		          [](const TreeNode* a, const TreeNode* b) {
+			          return a->table_op->estimated_cardinality < b->table_op->estimated_cardinality;
+		          });
+	}
+
 	// step 3: forward pass - bottom-up (leaves to root)
 	// process levels from highest (leaves) down to 1
 	for (int level = max_level; level >= 1; level--) {
