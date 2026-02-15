@@ -34,6 +34,29 @@ string PhysicalCreateBF::ToString(ExplainFormat format) const {
     return result;
 }
 
+InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
+	InsertionOrderPreservingMap<string> result;
+	result["Operator"] = "PhysicalCreateBF";
+	result["Build Table"] = to_string(bf_operation->build_table_idx);
+	result["Probe Table"] = to_string(bf_operation->probe_table_idx);
+
+	string build_cols = "";
+	for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
+		if (i > 0) {
+			build_cols += ", ";
+		}
+		build_cols += "(" + to_string(bf_operation->build_columns[i].table_index) +
+					 "." + to_string(bf_operation->build_columns[i].column_index) + ")";
+	}
+	result["Build Columns"] = build_cols;
+
+	if (estimated_cardinality != DConstants::INVALID_INDEX) {
+		result["Estimated Cardinality"] = std::to_string(estimated_cardinality);
+	}
+
+	return result;
+}
+
 //===--------------------------------------------------------------------===//
 // Sink
 //===--------------------------------------------------------------------===//

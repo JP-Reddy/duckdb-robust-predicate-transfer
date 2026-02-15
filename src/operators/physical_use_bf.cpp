@@ -27,6 +27,30 @@ string PhysicalUseBF::ToString(ExplainFormat format) const {
 	return result;
 }
 
+InsertionOrderPreservingMap<string> PhysicalUseBF::ParamsToString() const {
+	InsertionOrderPreservingMap<string> result;
+	result["Operator"] = "PhysicalUseBF";
+
+	result["Build Table"] = to_string(bf_operation->build_table_idx);
+	result["Probe Table"] = to_string(bf_operation->probe_table_idx);
+
+	string probe_cols = "";
+	for (size_t i = 0; i < bf_operation->probe_columns.size(); i++) {
+		if (i > 0) {
+			probe_cols += ", ";
+		}
+		probe_cols += "(" + to_string(bf_operation->probe_columns[i].table_index) +
+					 "." + to_string(bf_operation->probe_columns[i].column_index) + ")";
+	}
+	result["Probe Columns"] = probe_cols;
+
+	if (estimated_cardinality != DConstants::INVALID_INDEX) {
+		result["Estimated Cardinality"] = std::to_string(estimated_cardinality);
+	}
+
+	return result;
+}
+
 unique_ptr<OperatorState> PhysicalUseBF::GetOperatorState(ExecutionContext &context) const {
 	return make_uniq<PhysicalUseBFState>();
 }

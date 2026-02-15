@@ -26,6 +26,9 @@ public:
 	string GetName() const override;
 	string ToString(ExplainFormat format = ExplainFormat::DEFAULT) const override;
 
+	// populate info in query plan
+	InsertionOrderPreservingMap<string> ParamsToString() const override;
+
 	// sink interface - PhysicalOperator can act as sink
 	unique_ptr<GlobalSinkState> GetGlobalSinkState(ClientContext &context) const override;
 	unique_ptr<LocalSinkState> GetLocalSinkState(ExecutionContext &context) const override;

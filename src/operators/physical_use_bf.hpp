@@ -33,6 +33,9 @@ public:
 	string GetName() const override;
 	string ToString(ExplainFormat format = ExplainFormat::DEFAULT) const override;
 
+	// populate info in query plan
+	InsertionOrderPreservingMap<string> ParamsToString() const override;
+
 	// state management
 	unique_ptr<OperatorState> GetOperatorState(ExecutionContext &context) const override;
 
