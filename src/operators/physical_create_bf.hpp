@@ -1,7 +1,6 @@
 #pragma once
 
 #include "duckdb/execution/physical_operator.hpp"
-#include "dag.hpp"
 #include "bloom_filter.hpp"
 #include "../optimizer/graph_manager.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"

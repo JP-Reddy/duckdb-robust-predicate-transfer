@@ -1,6 +1,5 @@
 #include "logical_use_bf.hpp"
 #include "physical_use_bf.hpp"
-#include "dag.hpp"
 #include "debug_utils.hpp"
 
 namespace duckdb {

@@ -18,22 +18,13 @@ include_directories(src/include)
 
 set(EXTENSION_SOURCES
     src/rpt_extension.cpp
-#    src/operators/logical_hello.cpp
-#    src/operators/physical_hello.cpp
-    src/dag.cpp
     src/bloom_filter.cpp
     src/operators/logical_create_bf.cpp
     src/operators/physical_create_bf.cpp
     src/operators/logical_use_bf.cpp
     src/operators/physical_use_bf.cpp
-#    src/predicate_transfer_optimization.cpp
-#    src/table_operator_manager.cpp
-#    src/transfer_graph_manager.cpp
     src/optimizer/rpt_optimizer.cpp
-#    src/optimizer/graph_manager.cpp
     src/optimizer/table_manager.cpp
-#    src/bottom_up_rpt_optimizer.cpp
-#    src/robust_predicate_transfer_optimizer.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

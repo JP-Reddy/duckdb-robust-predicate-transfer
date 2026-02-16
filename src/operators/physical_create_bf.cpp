@@ -1,5 +1,4 @@
 #include "physical_create_bf.hpp"
-#include "dag.hpp"
 #include "bloom_filter.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parallel/pipeline.hpp"
