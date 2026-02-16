@@ -192,8 +192,9 @@ public:
 
 		for (auto &[col, bf] : sink.op.bloom_filter_map) {
 			if (bf) {
+				bf->Fold();
 				bf->finalized_ = true;
-				D_PRINTF("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) marked as finalized",
+				D_PRINTF("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) folded and finalized",
 				         build_table.c_str(), (unsigned long long)col.table_index, (unsigned long long)col.column_index);
 			}
 		}

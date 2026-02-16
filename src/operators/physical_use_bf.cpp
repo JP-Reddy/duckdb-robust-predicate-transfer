@@ -131,7 +131,7 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		}
 
 		// check if bloom filter is empty (no data inserted)
-		if (bf->num_sectors == 0 || bf->blocks == nullptr) {
+		if (bf->IsEmpty()) {
 			string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 			D_PRINTF("Bloom filter empty for %s", build_table.c_str());
 			// empty filter means no matches possible

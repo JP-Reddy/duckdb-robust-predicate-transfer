@@ -3,25 +3,11 @@
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
 
-#include <random>
-#include <cmath>
-#include <iostream>
-
 namespace duckdb {
-namespace {
-static uint32_t CeilPowerOfTwo(uint32_t n) {
-	if (n <= 1) {
-		return 1;
-	}
-	n--;
-	n |= (n >> 1);
-	n |= (n >> 2);
-	n |= (n >> 4);
-	n |= (n >> 8);
-	n |= (n >> 16);
-	return n + 1;
-}
 
+BloomFilterMasks BlockedBloomFilter::masks_;
+
+namespace {
 static Vector HashColumns(DataChunk &chunk, const vector<idx_t> &cols) {
 	auto count = chunk.size();
 	Vector hashes(LogicalType::HASH);
@@ -41,31 +27,34 @@ static Vector HashColumns(DataChunk &chunk, const vector<idx_t> &cols) {
 void BloomFilter::Initialize(ClientContext &context_p, uint32_t est_num_rows) {
 	context = &context_p;
 	buffer_manager = &BufferManager::GetBufferManager(*context);
-
-	uint32_t min_bits = std::max<uint32_t>(MIN_NUM_BITS, est_num_rows * MIN_NUM_BITS_PER_KEY);
-	num_sectors = std::min(CeilPowerOfTwo(min_bits) >> LOG_SECTOR_SIZE, MAX_NUM_SECTORS);
-	num_sectors_log = static_cast<uint32_t>(std::log2(num_sectors));
-
-	buf_ = buffer_manager->GetBufferAllocator().Allocate(64 + num_sectors * sizeof(uint32_t));
-	// make sure blocks is a 64-byte aligned pointer, i.e., cache-line aligned
-	blocks = reinterpret_cast<std::atomic<uint32_t> *>((64ULL + reinterpret_cast<uint64_t>(buf_.get())) & ~63ULL);
-	// std::fill_n(blocks, num_sectors, 0);
-	for (uint32_t i = 0; i < num_sectors; i++) {
-		blocks[i].store(0, std::memory_order_relaxed);
-	}
+	bbf_.CreateEmpty(static_cast<int64_t>(est_num_rows));
 }
 
 int BloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vector<idx_t> &bound_cols_applied) const {
 	int count = static_cast<int>(chunk.size());
 	Vector hashes = HashColumns(chunk, bound_cols_applied);
-	BloomFilterLookup(count, reinterpret_cast<uint64_t *>(hashes.GetData()), blocks, results.data());
+	auto hash_data = reinterpret_cast<const uint64_t *>(hashes.GetData());
+
+	// BlockedBloomFilter returns results as a bit vector
+	vector<uint8_t> bit_vector((count + 7) / 8, 0);
+	bbf_.Find(count, hash_data, bit_vector.data());
+
+	// convert bit vector to uint32_t results (1 or 0 per row)
+	for (int i = 0; i < count; i++) {
+		results[i] = (bit_vector[i / 8] >> (i % 8)) & 1;
+	}
 	return count;
 }
 
 void BloomFilter::Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built) {
 	int count = static_cast<int>(chunk.size());
 	Vector hashes = HashColumns(chunk, bound_cols_built);
-	BloomFilterInsert(count, reinterpret_cast<uint64_t *>(hashes.GetData()), blocks);
+	auto hash_data = reinterpret_cast<const uint64_t *>(hashes.GetData());
+	bbf_.InsertAtomic(count, hash_data);
+}
+
+void BloomFilter::Fold() {
+	bbf_.Fold();
 }
 
 // initialize builder with target bf and columns to hash
@@ -75,7 +64,6 @@ void BloomFilterBuilder::Begin(shared_ptr<BloomFilter> bf, const vector<idx_t> &
 }
 
 void BloomFilterBuilder::PushNextBatch(DataChunk &chunk) const {
-	// hash the raw data once and insert into bloom filter
 	bloom_filter->Insert(chunk, bound_cols);
 }
 
