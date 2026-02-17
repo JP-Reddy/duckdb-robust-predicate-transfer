@@ -951,10 +951,6 @@ void RPTOptimizerContextState::Optimize(OptimizerExtensionInput &input, unique_p
 	auto profiling = GetRPTProfilingState(input.context);
 	auto opt_start = std::chrono::high_resolution_clock::now();
 
-	Printer::Print("\n=== LOGICAL PLAN BEFORE RPT ===");
-	Printer::Print(plan->ToString());
-	Printer::Print("=== END LOGICAL PLAN ===\n");
-
 	const auto optimizer_state = input.context.registered_state->GetOrCreate<RPTOptimizerContextState>("rpt_optimizer_state", input.context);
 	plan = optimizer_state->Optimize(std::move(plan));
 
