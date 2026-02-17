@@ -1,6 +1,7 @@
 #include "table_manager.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "debug_utils.hpp"
 
 namespace duckdb {
@@ -97,6 +98,56 @@ TableInfo *TableManager::GetTableInfo(LogicalOperator *op) {
 		return nullptr;
 	}
 	return &table_lookup[table_idx];
+}
+
+LogicalGet* TableManager::FindLogicalGet(LogicalOperator *op) {
+	if (!op) {
+		return nullptr;
+	}
+	if (op->type == LogicalOperatorType::LOGICAL_GET) {
+		return &op->Cast<LogicalGet>();
+	}
+	for (auto &child : op->children) {
+		auto *result = FindLogicalGet(child.get());
+		if (result) {
+			return result;
+		}
+	}
+	return nullptr;
+}
+
+string TableManager::GetTableName(idx_t table_idx) {
+	auto it = table_lookup.find(table_idx);
+	if (it == table_lookup.end()) {
+		return "table_" + std::to_string(table_idx);
+	}
+	auto *get = FindLogicalGet(it->second.table_op);
+	if (get) {
+		auto table = get->GetTable();
+		if (table) {
+			return table->name;
+		}
+	}
+	return "table_" + std::to_string(table_idx);
+}
+
+string TableManager::GetColumnName(idx_t table_idx, idx_t column_index) {
+	auto it = table_lookup.find(table_idx);
+	if (it == table_lookup.end()) {
+		return "col_" + std::to_string(column_index);
+	}
+	auto *get = FindLogicalGet(it->second.table_op);
+	if (!get) {
+		return "col_" + std::to_string(column_index);
+	}
+	auto &col_ids = get->GetColumnIds();
+	if (column_index < col_ids.size()) {
+		idx_t primary_idx = col_ids[column_index].GetPrimaryIndex();
+		if (primary_idx < get->names.size()) {
+			return get->names[primary_idx];
+		}
+	}
+	return "col_" + std::to_string(column_index);
 }
 
 } // namespace duckdb

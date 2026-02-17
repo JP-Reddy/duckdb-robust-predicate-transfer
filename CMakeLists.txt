@@ -25,6 +25,7 @@ set(EXTENSION_SOURCES
     src/operators/physical_use_bf.cpp
     src/optimizer/rpt_optimizer.cpp
     src/optimizer/table_manager.cpp
+    src/utils/dag_printer.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

@@ -3,6 +3,7 @@
 #include "graph_manager.hpp"
 #include "table_manager.hpp"
 #include "duckdb/main/client_context_state.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/unordered_map.hpp"
 
@@ -23,7 +24,9 @@ struct TreeNode {
 
 class RPTOptimizerContextState : public ClientContextState {
 public:
-	explicit RPTOptimizerContextState(ClientContext &context) {}
+	explicit RPTOptimizerContextState(ClientContext &ctx) : context(ctx) {}
+
+	ClientContext &context;
 
 	vector<JoinEdge> join_edges;
 //	map<table_id, idx_t> table_cardinalities;
@@ -75,6 +78,9 @@ public:
 	// debug functions
 	void DebugPrintGraph(const vector<JoinEdge> &edges) const;
 	void DebugPrintMST(const vector<JoinEdge> &mst_edges, const vector<BloomFilterOperation> &bf_operations);
+
+	// print DAG as ASCII tree (gated by rpt_display_dag setting)
+	void PrintDAG(TreeNode *root);
 
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 

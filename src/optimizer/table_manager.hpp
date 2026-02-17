@@ -2,6 +2,7 @@
 
 #include "duckdb/common/types.hpp"
 #include "duckdb/planner/logical_operator.hpp"
+#include "duckdb/planner/operator/logical_get.hpp"
 #include <map>
 
 
@@ -28,6 +29,13 @@ public:
 	idx_t GetScalarTableIndex(LogicalOperator *op);
 
 	void AddTableOperator(LogicalOperator *op);
+
+	// navigate from registered operator to underlying LogicalGet
+	static LogicalGet* FindLogicalGet(LogicalOperator *op);
+	// resolve table name from table index
+	string GetTableName(idx_t table_idx);
+	// resolve column name from table index and column binding index
+	string GetColumnName(idx_t table_idx, idx_t column_index);
 };
 
 } // namespace duckdb

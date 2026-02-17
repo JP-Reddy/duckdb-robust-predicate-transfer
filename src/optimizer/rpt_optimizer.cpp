@@ -14,6 +14,7 @@
 #include "../operators/logical_use_bf.hpp"
 #include "debug_utils.hpp"
 #include "rpt_profiling.hpp"
+#include "../utils/dag_printer.hpp"
 #include <chrono>
 
 namespace duckdb {
@@ -484,6 +485,14 @@ void RPTOptimizerContextState::DebugPrintMST([[maybe_unused]] const vector<JoinE
 #endif
 }
 
+void RPTOptimizerContextState::PrintDAG(TreeNode *root) {
+	Value val;
+	if (!context.TryGetCurrentSetting("rpt_display_dag", val) || !val.GetValue<bool>()) {
+		return;
+	}
+	PrintTransferDAG(root, table_mgr);
+}
+
 std::pair<unordered_map<LogicalOperator*, vector<BloomFilterOperation>>,
           unordered_map<LogicalOperator*, vector<BloomFilterOperation>>>
 RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
@@ -496,6 +505,9 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 		D_PRINT("ERROR: BuildRootedTree returned nullptr, returning empty modifications");
 		return {{}, {}};
 	}
+
+	// display DAG if setting is enabled
+	PrintDAG(root);
 
 	// step 2: collect all nodes organized by level
 	unordered_map<int, vector<TreeNode*>> nodes_by_level;
