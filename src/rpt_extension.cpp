@@ -56,6 +56,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto &config = DBConfig::GetConfig(instance);
 	config.AddExtensionOption("rpt_profiling", "Enable RPT extension profiling output",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
+	config.AddExtensionOption("rpt_display_dag", "Display RPT transfer DAG",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
 }
 
 std::string RptExtension::Name() {

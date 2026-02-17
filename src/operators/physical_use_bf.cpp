@@ -62,7 +62,7 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		auto prof = GetRPTProfilingState(context.client);
 		if (prof) {
 			profiling_stats = prof->RegisterUseBF(
-			    bf_operation->build_table_idx, bf_operation->probe_table_idx);
+			    bf_operation->build_table_idx, bf_operation->probe_table_idx, bf_operation->sequence_number);
 		}
 	}
 
