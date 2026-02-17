@@ -962,6 +962,11 @@ void RPTOptimizerContextState::Optimize(OptimizerExtensionInput &input, unique_p
 		auto opt_end = std::chrono::high_resolution_clock::now();
 		profiling->optimizer_time_us =
 		    std::chrono::duration_cast<std::chrono::microseconds>(opt_end - opt_start).count();
+
+		// populate table names for profiling output
+		for (const auto &ti : optimizer_state->table_mgr.table_ops) {
+			profiling->table_names[ti.table_idx] = optimizer_state->table_mgr.GetTableName(ti.table_idx);
+		}
 	}
 
 	input.context.registered_state->Remove("rpt_optimizer_state");

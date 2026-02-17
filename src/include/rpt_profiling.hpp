@@ -9,6 +9,7 @@
 #include <mutex>
 #include <vector>
 #include <algorithm>
+#include <map>
 
 namespace duckdb {
 
@@ -54,9 +55,20 @@ public:
 	bool enabled;
 	int64_t optimizer_time_us = 0;
 
+	// table index -> resolved table name (populated at optimizer time)
+	std::map<idx_t, string> table_names;
+
 	mutex stats_lock;
 	vector<shared_ptr<CreateBFStats>> create_bf_stats;
 	vector<shared_ptr<UseBFStats>> use_bf_stats;
+
+	string GetName(idx_t table_idx) const {
+		auto it = table_names.find(table_idx);
+		if (it != table_names.end()) {
+			return it->second;
+		}
+		return "table_" + std::to_string(table_idx);
+	}
 
 	shared_ptr<CreateBFStats> RegisterCreateBF(idx_t build_table_idx, idx_t probe_table_idx, idx_t sequence_number) {
 		lock_guard<mutex> lock(stats_lock);
@@ -115,9 +127,9 @@ public:
 		for (auto &e : entries) {
 			if (e.is_create) {
 				auto &s = create_bf_stats[e.idx];
-				Printer::PrintF("CREATE_BF: [build=table_%llu -> probe=table_%llu] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
-				    (unsigned long long)s->build_table_idx,
-				    (unsigned long long)s->probe_table_idx,
+				Printer::PrintF("CREATE_BF: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
+				    GetName(s->build_table_idx).c_str(),
+				    GetName(s->probe_table_idx).c_str(),
 				    (unsigned long long)s->rows_materialized.load(),
 				    (long long)s->sink_time_us.load(),
 				    (long long)s->finalize_time_us.load(),
@@ -130,9 +142,9 @@ public:
 				idx_t ri = s->rows_in.load();
 				idx_t ro = s->rows_out.load();
 				double sel = ri > 0 ? 100.0 * (double)ro / ri : 0.0;
-				Printer::PrintF("USE_BF:    [build=table_%llu, probe=table_%llu] in=%llu, out=%llu, sel=%.1f%%, probe=%lldus",
-				    (unsigned long long)s->build_table_idx,
-				    (unsigned long long)s->probe_table_idx,
+				Printer::PrintF("USE_BF:    [build=%s, probe=%s] in=%llu, out=%llu, sel=%.1f%%, probe=%lldus",
+				    GetName(s->build_table_idx).c_str(),
+				    GetName(s->probe_table_idx).c_str(),
 				    (unsigned long long)ri, (unsigned long long)ro, sel,
 				    (long long)s->probe_time_us.load());
 				total_rows_in += ri;
