@@ -37,7 +37,19 @@ InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
 	result["Operator"] = "PhysicalCreateBF";
 	result["Build Table"] = to_string(bf_operation->build_table_idx);
-	result["Probe Table"] = to_string(bf_operation->probe_table_idx);
+	// there can be multiple probe tables for a single create
+	string probe_tables;
+	vector<idx_t> seen_probe;
+	for (const auto &col : bf_operation->probe_columns) {
+		bool found = false;
+		for (auto idx : seen_probe) { if (idx == col.table_index) { found = true; break; } }
+		if (!found) {
+			if (!probe_tables.empty()) probe_tables += ", ";
+			probe_tables += to_string(col.table_index);
+			seen_probe.push_back(col.table_index);
+		}
+	}
+	result["Probe Tables"] = probe_tables;
 
 	string build_cols = "";
 	for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
