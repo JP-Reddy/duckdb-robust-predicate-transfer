@@ -60,6 +60,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
 }
 
+void RptExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
+}
+
 std::string RptExtension::Name() {
 	return "rpt";
 }
