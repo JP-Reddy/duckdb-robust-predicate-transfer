@@ -19,6 +19,7 @@ include_directories(src/include)
 set(EXTENSION_SOURCES
     src/rpt_extension.cpp
     src/bloom_filter.cpp
+    src/partition_util.cpp
     src/operators/logical_create_bf.cpp
     src/operators/physical_create_bf.cpp
     src/operators/logical_use_bf.cpp
@@ -40,3 +41,18 @@ install(
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+
+# Bloom Filter Benchmark (standalone executable)
+option(BUILD_BLOOM_FILTER_BENCHMARK "Build the bloom filter benchmark" OFF)
+if(BUILD_BLOOM_FILTER_BENCHMARK)
+    add_executable(bloom_filter_benchmark
+        src/benchmark/bloom_filter_benchmark.cpp
+        src/partition_util.cpp
+        src/bloom_filter.cpp
+    )
+    target_include_directories(bloom_filter_benchmark PRIVATE
+        src/include
+        ${CMAKE_SOURCE_DIR}/src/include
+    )
+    target_link_libraries(bloom_filter_benchmark duckdb)
+endif()

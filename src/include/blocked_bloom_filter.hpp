@@ -259,6 +259,15 @@ public:
 		return num_blocks_;
 	}
 
+	int LogNumBlocks() const {
+		return log_num_blocks_;
+	}
+
+	// direct access to blocks for partition-based parallel building
+	uint64_t *Blocks() {
+		return blocks_;
+	}
+
 private:
 	inline uint64_t ComputeMask(uint64_t hash) const {
 		int mask_id = static_cast<int>(hash & (BloomFilterMasks::kNumMasks - 1));

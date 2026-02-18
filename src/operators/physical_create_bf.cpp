@@ -121,9 +121,10 @@ SinkCombineResultType PhysicalCreateBF::Combine(ExecutionContext &context, Opera
 class CreateBFFinalizeTask : public ExecutorTask {
 public:
 	CreateBFFinalizeTask(shared_ptr<Event> event_p, ClientContext &context, CreateBFGlobalSinkState &sink_p,
-		idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, size_t num_threads)
-			: ExecutorTask(context, event_p, sink_p.op), event(std::move(event_p)), sink(sink_p), chunk_idx_from(chunk_idx_from_p),
-			  chunk_idx_to(chunk_idx_to_p) {
+		idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, size_t thread_id_p, size_t num_threads_p)
+			: ExecutorTask(context, event_p, sink_p.op), event(std::move(event_p)), sink(sink_p),
+			  chunk_idx_from(chunk_idx_from_p), chunk_idx_to(chunk_idx_to_p),
+			  thread_id(thread_id_p), num_threads(num_threads_p) {
 
 	}
 
@@ -131,13 +132,12 @@ public:
 		ThreadContext tcontext(this->executor.context);
 		tcontext.profiler.StartOperator(&sink.op);
 
-		size_t thread_id = 0;
 		for (idx_t i = chunk_idx_from; i < chunk_idx_to; i++) {
 			DataChunk chunk;
 			sink.total_data->InitializeScanChunk(chunk);
 			sink.total_data->FetchChunk(i, chunk);
 			for (shared_ptr<BloomFilterBuilder> &bf_builder : sink.bf_builders) {
-				bf_builder->PushNextBatch(chunk);
+				bf_builder->PushNextBatch(thread_id, chunk);
 			}
 		}
 
@@ -152,6 +152,8 @@ private:
 	CreateBFGlobalSinkState &sink;
 	idx_t chunk_idx_from;
 	idx_t chunk_idx_to;
+	size_t thread_id;
+	size_t num_threads;
 };
 
 class CreateBFFinalizeEvent : public BasePipelineEvent {
@@ -173,7 +175,8 @@ public:
 		const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
 		if (num_threads == 1 || (buffer->Count() < PARALLEL_CONSTRUCT_THRESHOLD && !context.config.verify_parallelism)) {
 			// single threaded finalize
-			finalize_tasks.push_back(make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink, 0, chunk_count, 1));
+			finalize_tasks.push_back(make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink,
+				0, chunk_count, /*thread_id=*/0, /*num_threads=*/1));
 		}
 		else {
 			// parallel finalize
@@ -184,7 +187,7 @@ public:
 				idx_t chunk_idx_from = chunk_idx;
 				idx_t chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_thread, chunk_count);
 				finalize_tasks.push_back(make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink,
-					chunk_idx_from, chunk_idx_to, num_threads));
+					chunk_idx_from, chunk_idx_to, /*thread_id=*/thread_idx, num_threads));
 				chunk_idx = chunk_idx_to;
 				if (chunk_idx == chunk_count) {
 					break;
@@ -196,6 +199,13 @@ public:
 	}
 
 	void FinishEvent() override {
+		// clean up builder resources
+		for (auto &builder : sink.bf_builders) {
+			if (builder) {
+				builder->CleanUp();
+			}
+		}
+
 		// mark all bloom filters as finalized after parallel building completes
 		string build_table = sink.op.bf_operation ? "table_" + std::to_string(sink.op.bf_operation->build_table_idx) : "unknown";
 		D_PRINTF("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters",
@@ -271,7 +281,7 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 		if (it != bloom_filter_map.end()) {
 			auto builder = make_shared_ptr<BloomFilterBuilder>();
 			vector<idx_t> bound_cols = {bound_column_indices[i]};
-			builder->Begin(it->second, bound_cols);
+			builder->Begin(it->second, bound_cols, num_threads);
 			gsink.bf_builders.emplace_back(builder);
 		}
 	}
