@@ -16,7 +16,7 @@ namespace duckdb {
 struct CreateBFStats {
 	idx_t sequence_number = 0;
 	idx_t build_table_idx = 0;
-	idx_t probe_table_idx = 0;
+	vector<idx_t> probe_table_indices;
 	std::atomic<idx_t> rows_materialized{0};
 	std::atomic<int64_t> sink_time_us{0};
 	std::atomic<int64_t> finalize_time_us{0};
@@ -70,12 +70,27 @@ public:
 		return "table_" + std::to_string(table_idx);
 	}
 
-	shared_ptr<CreateBFStats> RegisterCreateBF(idx_t build_table_idx, idx_t probe_table_idx, idx_t sequence_number) {
+	shared_ptr<CreateBFStats> RegisterCreateBF(idx_t build_table_idx,
+	                                           const vector<ColumnBinding> &probe_columns,
+	                                           idx_t sequence_number) {
 		lock_guard<mutex> lock(stats_lock);
 		auto stats = make_shared_ptr<CreateBFStats>();
 		stats->sequence_number = sequence_number;
 		stats->build_table_idx = build_table_idx;
-		stats->probe_table_idx = probe_table_idx;
+		// extract unique probe table indices from probe columns
+		for (const auto &col : probe_columns) {
+			if (stats->probe_table_indices.empty() ||
+			    stats->probe_table_indices.back() != col.table_index) {
+				// check if already present
+				bool found = false;
+				for (auto idx : stats->probe_table_indices) {
+					if (idx == col.table_index) { found = true; break; }
+				}
+				if (!found) {
+					stats->probe_table_indices.push_back(col.table_index);
+				}
+			}
+		}
 		create_bf_stats.push_back(stats);
 		return stats;
 	}
@@ -127,9 +142,15 @@ public:
 		for (auto &e : entries) {
 			if (e.is_create) {
 				auto &s = create_bf_stats[e.idx];
+				string probe_names;
+				for (size_t pi = 0; pi < s->probe_table_indices.size(); pi++) {
+					if (pi > 0) probe_names += ",";
+					probe_names += GetName(s->probe_table_indices[pi]);
+				}
+				if (probe_names.empty()) probe_names = "?";
 				Printer::PrintF("CREATE_BF: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
 				    GetName(s->build_table_idx).c_str(),
-				    GetName(s->probe_table_idx).c_str(),
+				    probe_names.c_str(),
 				    (unsigned long long)s->rows_materialized.load(),
 				    (long long)s->sink_time_us.load(),
 				    (long long)s->finalize_time_us.load(),
