@@ -13,6 +13,14 @@
 #include <cstring>
 #include <random>
 
+// ARM NEON SIMD support detection
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#define BLOOM_FILTER_USE_NEON 1
+#include <arm_neon.h>
+#else
+#define BLOOM_FILTER_USE_NEON 0
+#endif
+
 namespace duckdb {
 
 // rotate left for 64-bit
@@ -33,9 +41,32 @@ inline int64_t CountSetBits(const uint8_t *data, int64_t num_bits) {
 	int64_t count = 0;
 	int64_t num_full_words = num_bits / 64;
 	const auto *words = reinterpret_cast<const uint64_t *>(data);
+
+#if BLOOM_FILTER_USE_NEON
+	// use vcntq_u8 for population count
+	int64_t i = 0;
+	uint64x2_t sum_vec = vdupq_n_u64(0);
+
+	for (; i + 2 <= num_full_words; i += 2) {
+		uint8x16_t bytes = vld1q_u8(reinterpret_cast<const uint8_t *>(words + i));
+		uint8x16_t popcnt = vcntq_u8(bytes);
+		// sum all bytes into the accumulator
+		sum_vec = vaddq_u64(sum_vec, vpaddlq_u32(vpaddlq_u16(vpaddlq_u8(popcnt))));
+	}
+
+	// extract sum from NEON register
+	count = vgetq_lane_u64(sum_vec, 0) + vgetq_lane_u64(sum_vec, 1);
+
+	// handle remaining full words
+	for (; i < num_full_words; ++i) {
+		count += __builtin_popcountll(words[i]);
+	}
+#else
 	for (int64_t i = 0; i < num_full_words; ++i) {
 		count += __builtin_popcountll(words[i]);
 	}
+#endif
+
 	// remaining bits
 	int64_t remaining = num_bits - num_full_words * 64;
 	if (remaining > 0) {
@@ -292,9 +323,25 @@ private:
 
 		for (int64_t slice = 1; slice < num_slices; ++slice) {
 			const uint64_t *source_slice = blocks_ + slice * num_slice_blocks;
+
+#if BLOOM_FILTER_USE_NEON
+			// process 2 blocks at a time (128-bit)
+			int64_t i = 0;
+			for (; i + 2 <= num_slice_blocks; i += 2) {
+				uint64x2_t target_vec = vld1q_u64(target_slice + i);
+				uint64x2_t source_vec = vld1q_u64(source_slice + i);
+				uint64x2_t result = vorrq_u64(target_vec, source_vec);
+				vst1q_u64(target_slice + i, result);
+			}
+			// handle remaining block if odd count
+			for (; i < num_slice_blocks; ++i) {
+				target_slice[i] |= source_slice[i];
+			}
+#else
 			for (int64_t i = 0; i < num_slice_blocks; ++i) {
 				target_slice[i] |= source_slice[i];
 			}
+#endif
 		}
 
 		log_num_blocks_ -= num_folds;
