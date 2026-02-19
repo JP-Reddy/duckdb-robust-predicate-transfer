@@ -55,7 +55,7 @@ void BloomFilter::Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built
 	int count = static_cast<int>(chunk.size());
 	Vector hashes = HashColumns(chunk, bound_cols_built);
 	auto hash_data = reinterpret_cast<const uint64_t *>(hashes.GetData());
-	bbf_.InsertAtomic(count, hash_data);
+	bbf_.Insert(count, hash_data);
 }
 
 void BloomFilter::InsertHashes(int64_t num_rows, const uint64_t *hashes) {
