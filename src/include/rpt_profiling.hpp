@@ -175,7 +175,8 @@ public:
 		}
 
 		Printer::Print("\nTotals:");
-		Printer::PrintF("  sink+source: %lld us", (long long)(total_sink_us + total_source_us));
+		Printer::PrintF("  sink: %lld us", (long long)total_sink_us);
+		Printer::PrintF("  source: %lld us", (long long)total_source_us);
 		Printer::PrintF("  finalize (BF build): %lld us", (long long)total_finalize_us);
 		Printer::PrintF("  probe: %lld us", (long long)total_probe_us);
 		if (total_rows_in > 0) {
