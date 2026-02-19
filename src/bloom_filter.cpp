@@ -59,6 +59,46 @@ int BloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vecto
 	return count;
 }
 
+idx_t BloomFilter::LookupSel(DataChunk &chunk, SelectionVector &sel, const vector<idx_t> &bound_cols_applied,
+                             uint8_t *bit_vector_buf) const {
+	int count = static_cast<int>(chunk.size());
+	Vector hashes = HashColumns(chunk, bound_cols_applied);
+	auto hash_data = reinterpret_cast<const uint64_t *>(hashes.GetData());
+
+	int64_t bv_bytes = (count + 7) / 8;
+	memset(bit_vector_buf, 0, bv_bytes);
+	bbf_.Find(count, hash_data, bit_vector_buf);
+
+	// scan set bits directly into selection vector
+	idx_t result_count = 0;
+	auto *words = reinterpret_cast<const uint64_t *>(bit_vector_buf);
+	int64_t num_full_words = count / 64;
+
+	for (int64_t w = 0; w < num_full_words; w++) {
+		uint64_t bits = words[w];
+		idx_t base = static_cast<idx_t>(w * 64);
+		while (bits != 0) {
+			sel.set_index(result_count++, base + __builtin_ctzll(bits));
+			bits &= bits - 1;
+		}
+	}
+
+	// remaining rows
+	int remaining = count - static_cast<int>(num_full_words * 64);
+	if (remaining > 0) {
+		uint64_t bits = 0;
+		memcpy(&bits, bit_vector_buf + num_full_words * 8, (remaining + 7) / 8);
+		bits &= (1ULL << remaining) - 1;
+		idx_t base = static_cast<idx_t>(num_full_words * 64);
+		while (bits != 0) {
+			sel.set_index(result_count++, base + __builtin_ctzll(bits));
+			bits &= bits - 1;
+		}
+	}
+
+	return result_count;
+}
+
 void BloomFilter::Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built) {
 	int count = static_cast<int>(chunk.size());
 	Vector hashes = HashColumns(chunk, bound_cols_built);

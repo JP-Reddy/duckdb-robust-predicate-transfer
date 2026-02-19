@@ -35,6 +35,9 @@ public:
 public:
 	int Lookup(DataChunk &chunk, vector<uint32_t> &results, const vector<idx_t> &bound_cols_applied,
 	           uint8_t *bit_vector_buf = nullptr) const;
+	// direct bit vector → selection vector (no intermediate uint32_t array)
+	idx_t LookupSel(DataChunk &chunk, SelectionVector &sel, const vector<idx_t> &bound_cols_applied,
+	                uint8_t *bit_vector_buf) const;
 	void Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built);
 	void InsertHashes(int64_t num_rows, const uint64_t *hashes);
 	void Fold();

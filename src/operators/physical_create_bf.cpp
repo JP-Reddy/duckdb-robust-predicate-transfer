@@ -221,7 +221,8 @@ public:
 		}
 	}
 
-	static constexpr const idx_t PARALLEL_CONSTRUCT_THRESHOLD = 1048576;
+	// static constexpr const idx_t PARALLEL_CONSTRUCT_THRESHOLD = 1048576;
+	static constexpr const idx_t PARALLEL_CONSTRUCT_THRESHOLD = 100000;
 };
 
 void CreateBFGlobalSinkState::ScheduleFinalize(Pipeline &pipeline, Event &event) {

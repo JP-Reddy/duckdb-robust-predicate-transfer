@@ -199,17 +199,8 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		}
 #endif
 
-		// use bound column indices for vectorized lookup
-		auto &results = bf_state.results;
-		bf->Lookup(input, results, bound_column_indices, bf_state.bit_vector.data());
-
-		// build selection vector from results
-		result_count = 0;
-		for (idx_t i = 0; i < row_num; i++) {
-			if (results[i] != 0) {
-				sel.set_index(result_count++, i);
-			}
-		}
+		// lookup directly into selection vector
+		result_count = bf->LookupSel(input, sel, bound_column_indices, bf_state.bit_vector.data());
 
 		// early exit if no rows passed
 		if (result_count == 0) {
