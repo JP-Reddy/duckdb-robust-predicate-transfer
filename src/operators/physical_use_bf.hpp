@@ -12,11 +12,19 @@ class PhysicalCreateBF;
 
 class PhysicalUseBFState : public CachingOperatorState {
 public:
-	PhysicalUseBFState() : bloom_filters_initialized(false), tested_hardcoded(false) {}
+	PhysicalUseBFState()
+	    : bloom_filters_initialized(false), tested_hardcoded(false),
+	      sel(STANDARD_VECTOR_SIZE), results(STANDARD_VECTOR_SIZE),
+	      bit_vector((STANDARD_VECTOR_SIZE + 7) / 8) {}
 
 	vector<shared_ptr<BloomFilter>> bloom_filters;
 	bool bloom_filters_initialized;
 	bool tested_hardcoded;
+
+	// reusable buffers to avoid per-chunk heap allocations
+	SelectionVector sel;
+	vector<uint32_t> results;
+	vector<uint8_t> bit_vector;
 };
 
 class PhysicalUseBF : public CachingPhysicalOperator {

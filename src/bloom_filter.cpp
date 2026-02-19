@@ -35,18 +35,26 @@ void BloomFilter::Initialize(ClientContext &context_p, uint32_t est_num_rows) {
 	bbf_.CreateEmpty(static_cast<int64_t>(est_num_rows));
 }
 
-int BloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vector<idx_t> &bound_cols_applied) const {
+int BloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vector<idx_t> &bound_cols_applied,
+                        uint8_t *bit_vector_buf) const {
 	int count = static_cast<int>(chunk.size());
 	Vector hashes = HashColumns(chunk, bound_cols_applied);
 	auto hash_data = reinterpret_cast<const uint64_t *>(hashes.GetData());
 
-	// BlockedBloomFilter returns results as a bit vector
-	vector<uint8_t> bit_vector((count + 7) / 8, 0);
-	bbf_.Find(count, hash_data, bit_vector.data());
+	int64_t bv_bytes = (count + 7) / 8;
+	vector<uint8_t> local_bv;
+	if (!bit_vector_buf) {
+		local_bv.resize(bv_bytes, 0);
+		bit_vector_buf = local_bv.data();
+	} else {
+		memset(bit_vector_buf, 0, bv_bytes);
+	}
+
+	bbf_.Find(count, hash_data, bit_vector_buf);
 
 	// convert bit vector to uint32_t results (1 or 0 per row)
 	for (int i = 0; i < count; i++) {
-		results[i] = (bit_vector[i / 8] >> (i % 8)) & 1;
+		results[i] = (bit_vector_buf[i / 8] >> (i % 8)) & 1;
 	}
 	return count;
 }

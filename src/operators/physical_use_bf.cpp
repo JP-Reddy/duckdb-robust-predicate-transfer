@@ -116,7 +116,7 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 
 	// apply bloom filters
 	idx_t result_count = row_num;
-	SelectionVector sel(STANDARD_VECTOR_SIZE);
+	auto &sel = bf_state.sel;
 
 	unique_ptr<ScopedTimer> probe_timer;
 	if (profiling_stats) {
@@ -200,8 +200,8 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 #endif
 
 		// use bound column indices for vectorized lookup
-		vector<uint32_t> results(row_num);
-		bf->Lookup(input, results, bound_column_indices);
+		auto &results = bf_state.results;
+		bf->Lookup(input, results, bound_column_indices, bf_state.bit_vector.data());
 
 		// build selection vector from results
 		result_count = 0;
