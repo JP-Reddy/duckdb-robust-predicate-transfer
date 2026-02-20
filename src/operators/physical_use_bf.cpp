@@ -148,57 +148,6 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		// 	printf("bound columns for %s - %llu\n", probe_table.c_str(), bound_column_indices[i]);
 		// }
 
-#ifdef DEBUG
-		if (!bf_state.tested_hardcoded && bf_operation && bf_operation->build_table_idx == 3) {
-			Printer::Print("\n[HARDCODED TEST IN USE_BF] Testing if 37 title IDs can be found in bloom filter from table_3...");
-
-			vector<int32_t> test_ids = {
-				929582, 1547687, 1669098, 1688430, 1695344, 1710439, 1779162, 1739896,
-				1791810, 1715711, 1741821, 1847064, 1865784, 1808171, 1957879, 1931339,
-				1961996, 1964522, 2053304, 2168207, 2183752, 2134798, 2166666, 2297104,
-				2224135, 2209537, 2247126, 2384186, 2310404, 2455749, 2468515, 2421394,
-				2434310, 2425149, 2468797, 2437383, 2518849
-			};
-
-			// Create test chunk
-			DataChunk test_chunk;
-			test_chunk.Initialize(Allocator::DefaultAllocator(), {LogicalType::INTEGER});
-			test_chunk.SetCardinality(test_ids.size());
-
-			auto test_data = FlatVector::GetData<int32_t>(test_chunk.data[0]);
-			for (size_t i = 0; i < test_ids.size(); i++) {
-				test_data[i] = test_ids[i];
-			}
-
-			// Test lookup with column index 0 (same as bound_column_indices should be)
-			vector<uint32_t> test_results(test_ids.size());
-			vector<idx_t> test_cols = {0};
-			bf->Lookup(test_chunk, test_results, test_cols);
-
-			int found = 0;
-			int missing = 0;
-			Printer::PrintF("  Testing %zu IDs using column index 0:", test_ids.size());
-			for (size_t i = 0; i < test_ids.size(); i++) {
-				if (test_results[i] != 0) {
-					found++;
-				} else {
-					missing++;
-					Printer::PrintF("    ID %d NOT FOUND (BUG!)", test_ids[i]);
-				}
-			}
-			Printer::PrintF("  Found: %d / %zu", found, test_ids.size());
-			Printer::PrintF("  Missing: %d / %zu", missing, test_ids.size());
-
-			if (missing > 0) {
-				Printer::Print("  BLOOM FILTER LOOKUP FAILED FROM USE_BF!");
-			} else {
-				Printer::Print("  All 37 IDs found in bloom filter from USE_BF!");
-			}
-
-			bf_state.tested_hardcoded = true;
-		}
-#endif
-
 		// lookup directly into selection vector
 		result_count = bf->LookupSel(input, sel, bound_column_indices, bf_state.bit_vector.data());
 
