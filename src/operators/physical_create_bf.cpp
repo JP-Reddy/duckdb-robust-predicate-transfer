@@ -212,8 +212,8 @@ public:
 		         build_table.c_str(), sink.op.bloom_filter_map.size());
 
 		for (auto &entry : sink.op.bloom_filter_map) {
-			auto &col = entry.first;
-			auto &bf = entry.second;
+			const ColumnBinding &col = entry.first;
+			const shared_ptr<BloomFilter> &bf = entry.second;
 			if (bf) {
 				bf->Fold();
 				bf->finalized_ = true;
@@ -271,7 +271,7 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 	// 2. initialize bloom filters (iterate over map)
 	lock_guard<mutex> lock(gsink.bf_lock);
 	for (auto &entry : bloom_filter_map) {
-		auto &bf = entry.second;
+		const shared_ptr<BloomFilter> &bf = entry.second;
 		if (bf) {
 			bf->Initialize(context, estimated_cardinality);
 			bf->finalized_ = false;

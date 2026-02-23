@@ -368,9 +368,9 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 		TreeNode* current_node = table_to_node[current];
 
 		// process all neighbors
-		for (auto &adj_entry : adjacency[current]) {
-			auto &neighbor_idx = adj_entry.first;
-			auto &edge = adj_entry.second;
+		for (pair<idx_t, JoinEdge*> &adj_entry : adjacency[current]) {
+			idx_t &neighbor_idx = adj_entry.first;
+			JoinEdge *&edge = adj_entry.second;
 			if (visited.count(neighbor_idx) == 0) {
 				// verify neighbor node exists
 				if (table_to_node.find(neighbor_idx) == table_to_node.end() || !table_to_node[neighbor_idx]) {
