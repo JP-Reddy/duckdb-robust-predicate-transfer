@@ -306,14 +306,12 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 	// step 1: find largest table (root)
 	idx_t root_table_idx = 0;
 	idx_t max_cardinality = 0;
-	LogicalOperator* root_op = nullptr;
 	bool found_root = false;
 
 	for (const auto &table_info : table_mgr.table_ops) {
 		if (table_info.estimated_cardinality > max_cardinality) {
 			max_cardinality = table_info.estimated_cardinality;
 			root_table_idx = table_info.table_idx;
-			root_op = table_info.table_op;
 			found_root = true;
 		}
 	}
@@ -395,7 +393,8 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 	return table_to_node[root_table_idx];
 }
 
-void RPTOptimizerContextState::DebugPrintGraph([[maybe_unused]] const vector<JoinEdge> &edges) const {
+void RPTOptimizerContextState::DebugPrintGraph(const vector<JoinEdge> &edges) const {
+	(void)edges;
 #ifdef DEBUG
 	// Debug: Print all tables
 	Printer::Print("=== TABLE INFORMATION ===");
@@ -442,8 +441,10 @@ void RPTOptimizerContextState::DebugPrintGraph([[maybe_unused]] const vector<Joi
 #endif
 }
 
-void RPTOptimizerContextState::DebugPrintMST([[maybe_unused]] const vector<JoinEdge> &mst_edges, 
-                                             [[maybe_unused]] const vector<BloomFilterOperation> &bf_operations) {
+void RPTOptimizerContextState::DebugPrintMST(const vector<JoinEdge> &mst_edges,
+                                             const vector<BloomFilterOperation> &bf_operations) {
+	(void)mst_edges;
+	(void)bf_operations;
 #ifdef DEBUG
 	Printer::Print("=== MST EDGES ===");
 	for (size_t i = 0; i < mst_edges.size(); i++) {
@@ -727,7 +728,6 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(un
 
 	if (reverse_order) {
 		// backward pass
-		int iter = 0;
 		for (auto it = merged_ops.rbegin(); it != merged_ops.rend(); ++it) {
 			const auto &bf_op = *it;
 			unique_ptr<LogicalOperator> new_op;
@@ -743,7 +743,6 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::BuildStackedBFOperators(un
 		}
 	} else {
 		// forward pass: normal order
-		int iter = 0;
 		for (const auto &bf_op : merged_ops) {
 			unique_ptr<LogicalOperator> new_op;
 
