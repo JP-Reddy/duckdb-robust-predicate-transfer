@@ -46,11 +46,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	optimizer.optimize_function = RPTOptimizerContextState::Optimize;
 
 	DatabaseInstance &instance = loader.GetDatabaseInstance();
-	instance.config.optimizer_extensions.push_back(optimizer);
+	OptimizerExtension::Register(instance.config, optimizer);
 
 	// Register logical operators
-	instance.config.operator_extensions.push_back(make_uniq<CreateBFOperatorExtension>());
-	instance.config.operator_extensions.push_back(make_uniq<UseBFOperatorExtension>());
+	OperatorExtension::Register(instance.config, make_shared_ptr<CreateBFOperatorExtension>());
+	OperatorExtension::Register(instance.config, make_shared_ptr<UseBFOperatorExtension>());
 
 	// Register profiling setting
 	auto &config = DBConfig::GetConfig(instance);

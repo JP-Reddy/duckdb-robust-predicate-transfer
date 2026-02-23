@@ -369,7 +369,7 @@ unique_ptr<LocalSourceState> PhysicalCreateBF::GetLocalSourceState(
 }
 
 // TODO: fetch the chunks parallely
-SourceResultType PhysicalCreateBF::GetData(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const {
+SourceResultType PhysicalCreateBF::GetDataInternal(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const {
 
 	auto &gstate = sink_state->Cast<CreateBFGlobalSinkState>();
 	auto &lstate = input.local_state.Cast<CreateBFLocalSourceState>();

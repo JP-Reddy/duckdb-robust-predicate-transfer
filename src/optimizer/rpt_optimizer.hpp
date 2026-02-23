@@ -6,6 +6,7 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/unordered_map.hpp"
+#include "duckdb/optimizer/optimizer_extension.hpp"
 
 namespace duckdb {
 

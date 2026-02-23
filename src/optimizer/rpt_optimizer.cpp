@@ -57,9 +57,9 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 			case JoinType::SEMI:
 			case JoinType::RIGHT_SEMI: {
 				if (std::any_of(join.conditions.begin(), join.conditions.end(), [](const JoinCondition &jc) {
-							return jc.comparison == ExpressionType::COMPARE_EQUAL &&
-								   jc.left->type == ExpressionType::BOUND_COLUMN_REF &&
-								   jc.right->type == ExpressionType::BOUND_COLUMN_REF;
+							return jc.GetComparisonType() == ExpressionType::COMPARE_EQUAL &&
+								   jc.GetLHS().type == ExpressionType::BOUND_COLUMN_REF &&
+								   jc.GetRHS().type == ExpressionType::BOUND_COLUMN_REF;
 						})) {
 					// JoinEdge edge(join);
 					join_ops.push_back(op);
@@ -191,12 +191,12 @@ vector<JoinEdge> RPTOptimizerContextState::CreateJoinEdges(vector<LogicalOperato
 		vector<ColumnBinding> resolved_left_columns, resolved_right_columns;
 
 		for(const JoinCondition &cond: join.conditions) {
-			if(cond.comparison == ExpressionType::COMPARE_EQUAL &&
-				cond.left->type == ExpressionType::BOUND_COLUMN_REF &&
-				cond.right->type == ExpressionType::BOUND_COLUMN_REF) {
+			if(cond.GetComparisonType() == ExpressionType::COMPARE_EQUAL &&
+				cond.GetLHS().type == ExpressionType::BOUND_COLUMN_REF &&
+				cond.GetRHS().type == ExpressionType::BOUND_COLUMN_REF) {
 				// store original bindings
-				ColumnBinding left_binding = cond.left->Cast<BoundColumnRefExpression>().binding;
-				ColumnBinding right_binding = cond.right->Cast<BoundColumnRefExpression>().binding;
+				ColumnBinding left_binding = cond.GetLHS().Cast<BoundColumnRefExpression>().binding;
+				ColumnBinding right_binding = cond.GetRHS().Cast<BoundColumnRefExpression>().binding;
 
 				left_columns.push_back(left_binding);
 				right_columns.push_back(right_binding);

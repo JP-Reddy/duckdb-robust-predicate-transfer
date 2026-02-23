@@ -2,6 +2,7 @@
 
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
+#include "duckdb/common/vector_operations/vector_operations.hpp"
 
 namespace duckdb {
 

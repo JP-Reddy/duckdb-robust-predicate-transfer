@@ -11,6 +11,7 @@
 #include "partition_util.hpp"
 #include "duckdb/planner/column_binding.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
+#include "duckdb/common/types/data_chunk.hpp"
 
 #include <cstdint>
 

@@ -48,7 +48,7 @@ public:
 	unique_ptr<GlobalSourceState> GetGlobalSourceState(ClientContext &context) const override;
 	unique_ptr<LocalSourceState> GetLocalSourceState(ExecutionContext &context,
 							  GlobalSourceState &gstate) const override;
-	SourceResultType GetData(ExecutionContext &context, DataChunk &chunk,
+	SourceResultType GetDataInternal(ExecutionContext &context, DataChunk &chunk,
 				OperatorSourceInput &input) const override;
 
 	bool IsSource() const override {
