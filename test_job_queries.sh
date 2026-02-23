@@ -107,8 +107,7 @@ run_query() {
     
     if [ "$with_extension" = "true" ]; then
         # Run with extension, filter debug output
-        "$DUCKDB" "$DB" -unsigned -noheader -list -c "LOAD '$EXT'; $query" 2>/dev/null | \
-            grep -v "^\[" | grep -v "^DEBUG" | grep -v "^$" > "$output_file" || true
+        "$DUCKDB" "$DB" -unsigned -noheader -list -c "LOAD '$EXT'; $query" 2>/dev/null > "$output_file" || true
     else
         # Run without extension (baseline)
         "$DUCKDB" "$DB" -unsigned -noheader -list -c "$query" 2>/dev/null > "$output_file" || true
@@ -177,17 +176,14 @@ test_query() {
     
     mkdir -p "$RESULTS_DIR/rpt"
     
-    # Generate baseline if it doesn't exist
-    if [ ! -f "$baseline_file" ]; then
-        mkdir -p "$RESULTS_DIR/baseline"
-        run_query "$query" "false" "$baseline_file"
-    fi
-    
+    mkdir -p "$RESULTS_DIR/baseline"
+
     # Run with extension
     if [ "$TIMING" = "true" ]; then
-        local baseline_time=$(run_query_timed "$query" "false" "/tmp/baseline_timing.txt")
+        local baseline_time=$(run_query_timed "$query" "false" "$baseline_file")
         local rpt_time=$(run_query_timed "$query" "true" "$rpt_file")
     else
+        run_query "$query" "false" "$baseline_file"
         run_query "$query" "true" "$rpt_file"
     fi
     
