@@ -211,7 +211,9 @@ public:
 		D_PRINTF("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters",
 		         build_table.c_str(), sink.op.bloom_filter_map.size());
 
-		for (auto &[col, bf] : sink.op.bloom_filter_map) {
+		for (auto &entry : sink.op.bloom_filter_map) {
+			auto &col = entry.first;
+			auto &bf = entry.second;
 			if (bf) {
 				bf->Fold();
 				bf->finalized_ = true;
@@ -268,7 +270,8 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 
 	// 2. initialize bloom filters (iterate over map)
 	lock_guard<mutex> lock(gsink.bf_lock);
-	for (auto &[col, bf] : bloom_filter_map) {
+	for (auto &entry : bloom_filter_map) {
+		auto &bf = entry.second;
 		if (bf) {
 			bf->Initialize(context, estimated_cardinality);
 			bf->finalized_ = false;

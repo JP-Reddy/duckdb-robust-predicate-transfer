@@ -30,10 +30,10 @@ vector<JoinEdge> RPTOptimizerContextState::ExtractOperators(LogicalOperator &pla
 
 	// debug: print summary of registered nodes
 	D_PRINT("\n=== REGISTERED NODES SUMMARY ===");
-	for (const auto &[table_idx, table_info] : table_mgr.table_lookup) {
+	for (const auto &entry : table_mgr.table_lookup) {
 		D_PRINTF("  table_idx=%llu (type=%d, cardinality=%llu)",
-		         (unsigned long long)table_idx, (int)table_info.table_op->type,
-		         (unsigned long long)table_info.estimated_cardinality);
+		         (unsigned long long)entry.first, (int)entry.second.table_op->type,
+		         (unsigned long long)entry.second.estimated_cardinality);
 	}
 	D_PRINTF("Total registered nodes: %zu", table_mgr.table_lookup.size());
 	D_PRINTF("Total join operators found: %zu\n", join_ops.size());
@@ -368,7 +368,9 @@ TreeNode* RPTOptimizerContextState::BuildRootedTree(vector<JoinEdge> &mst_edges)
 		TreeNode* current_node = table_to_node[current];
 
 		// process all neighbors
-		for (auto &[neighbor_idx, edge] : adjacency[current]) {
+		for (auto &adj_entry : adjacency[current]) {
+			auto &neighbor_idx = adj_entry.first;
+			auto &edge = adj_entry.second;
 			if (visited.count(neighbor_idx) == 0) {
 				// verify neighbor node exists
 				if (table_to_node.find(neighbor_idx) == table_to_node.end() || !table_to_node[neighbor_idx]) {
