@@ -45,12 +45,11 @@ std::atomic<bool> *PartitionLocks::LockPtr(int prtn_id) {
 }
 
 int PartitionLocks::RandomInt(size_t thread_id, int num_values) {
-	return std::uniform_int_distribution<int>{0, num_values - 1}(rngs_[thread_id]);
+	return std::uniform_int_distribution<int> {0, num_values - 1}(rngs_[thread_id]);
 }
 
-bool PartitionLocks::AcquirePartitionLock(size_t thread_id, int num_prtns_to_try,
-                                          const int *prtns_to_try, bool limit_retries,
-                                          int max_retries, int *locked_prtn_id,
+bool PartitionLocks::AcquirePartitionLock(size_t thread_id, int num_prtns_to_try, const int *prtns_to_try,
+                                          bool limit_retries, int max_retries, int *locked_prtn_id,
                                           int *locked_prtn_id_pos) {
 	int trial = 0;
 

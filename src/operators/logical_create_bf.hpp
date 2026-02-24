@@ -29,13 +29,12 @@ public:
 	BloomFilterOperation bf_operation;
 	PhysicalCreateBF *physical = nullptr;
 
-	vector<LogicalUseBF*> related_use_bf;
+	vector<LogicalUseBF *> related_use_bf;
 	vector<shared_ptr<DynamicTableFilterSet>> min_max_to_create;
 	vector<vector<ColumnBinding>> min_max_applied_cols;
 	string message;
 
 public:
-
 	string GetExtensionName() const override {
 		return "rpt";
 	}

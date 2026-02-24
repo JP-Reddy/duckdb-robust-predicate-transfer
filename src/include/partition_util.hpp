@@ -42,8 +42,8 @@ public:
 	//   prtn_ranges: [0, 1, 5, 6]
 	//
 	template <typename PRTN_ID_FN, typename OUTPUT_FN>
-	static void Eval(int64_t num_rows, int num_prtns, uint16_t *prtn_ranges,
-	                 PRTN_ID_FN prtn_id_fn, OUTPUT_FN output_fn) {
+	static void Eval(int64_t num_rows, int num_prtns, uint16_t *prtn_ranges, PRTN_ID_FN prtn_id_fn,
+	                 OUTPUT_FN output_fn) {
 		D_ASSERT(num_rows > 0 && num_rows <= (1 << 15));
 		D_ASSERT(num_prtns >= 1 && num_prtns <= (1 << 15));
 
@@ -102,10 +102,8 @@ public:
 	// locked_prtn_id_pos: Output - the index in prtns_to_try of the locked partition
 	//
 	// Returns true if a partition was locked, false if max_retries exceeded.
-	bool AcquirePartitionLock(size_t thread_id, int num_prtns_to_try,
-	                          const int *prtns_to_try, bool limit_retries,
-	                          int max_retries, int *locked_prtn_id,
-	                          int *locked_prtn_id_pos);
+	bool AcquirePartitionLock(size_t thread_id, int num_prtns_to_try, const int *prtns_to_try, bool limit_retries,
+	                          int max_retries, int *locked_prtn_id, int *locked_prtn_id_pos);
 
 	// Release a partition so other threads can work on it.
 	void ReleasePartitionLock(int prtn_id);
@@ -117,8 +115,7 @@ public:
 	// is_prtn_empty_fn: Returns true if partition should be skipped
 	// process_prtn_fn: Called for each partition after acquiring its lock
 	template <typename IS_PRTN_EMPTY_FN, typename PROCESS_PRTN_FN>
-	void ForEachPartition(size_t thread_id, int *temp_unprocessed_prtns,
-	                      IS_PRTN_EMPTY_FN is_prtn_empty_fn,
+	void ForEachPartition(size_t thread_id, int *temp_unprocessed_prtns, IS_PRTN_EMPTY_FN is_prtn_empty_fn,
 	                      PROCESS_PRTN_FN process_prtn_fn) {
 		int num_unprocessed = 0;
 		for (int i = 0; i < num_prtns_; ++i) {
@@ -131,28 +128,30 @@ public:
 			int locked_prtn_id;
 			int locked_prtn_id_pos;
 			AcquirePartitionLock(thread_id, num_unprocessed, temp_unprocessed_prtns,
-			                     /*limit_retries=*/false, /*max_retries=*/-1,
-			                     &locked_prtn_id, &locked_prtn_id_pos);
+			                     /*limit_retries=*/false, /*max_retries=*/-1, &locked_prtn_id, &locked_prtn_id_pos);
 
 			// RAII lock release
 			struct AutoRelease {
 				PartitionLocks *locks;
 				int prtn_id;
-				~AutoRelease() { locks->ReleasePartitionLock(prtn_id); }
-			} auto_release{this, locked_prtn_id};
+				~AutoRelease() {
+					locks->ReleasePartitionLock(prtn_id);
+				}
+			} auto_release {this, locked_prtn_id};
 
 			process_prtn_fn(locked_prtn_id);
 
 			// remove processed partition from list
 			if (locked_prtn_id_pos < num_unprocessed - 1) {
-				temp_unprocessed_prtns[locked_prtn_id_pos] =
-				    temp_unprocessed_prtns[num_unprocessed - 1];
+				temp_unprocessed_prtns[locked_prtn_id_pos] = temp_unprocessed_prtns[num_unprocessed - 1];
 			}
 			--num_unprocessed;
 		}
 	}
 
-	int NumPartitions() const { return num_prtns_; }
+	int NumPartitions() const {
+		return num_prtns_;
+	}
 
 private:
 	std::atomic<bool> *LockPtr(int prtn_id);
@@ -160,7 +159,7 @@ private:
 
 	// cache-line padded lock to avoid false sharing
 	struct alignas(64) PartitionLock {
-		std::atomic<bool> lock{false};
+		std::atomic<bool> lock {false};
 	};
 
 	int num_prtns_;

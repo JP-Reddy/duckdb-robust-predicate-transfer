@@ -165,7 +165,8 @@ void BloomFilterBuilder_Parallel::Begin(size_t num_threads, shared_ptr<BloomFilt
 
 	int log_num_blocks = bloom_filter_->GetBlockedBloomFilter().LogNumBlocks();
 	int log_num_prtns_max = std::max(0, log_num_blocks - kLogBlocksKeptTogether);
-	log_num_prtns_ = std::min(kMaxLogNumPrtns, std::min(log_num_prtns_max, Log2Ceil(static_cast<int64_t>(num_threads))));
+	log_num_prtns_ =
+	    std::min(kMaxLogNumPrtns, std::min(log_num_prtns_max, Log2Ceil(static_cast<int64_t>(num_threads))));
 
 	int num_prtns = 1 << log_num_prtns_;
 

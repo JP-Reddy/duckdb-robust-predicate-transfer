@@ -31,7 +31,6 @@ public:
 	PhysicalUseBF *physical = nullptr;
 
 public:
-
 	string GetExtensionName() const override {
 		return "rpt";
 	}

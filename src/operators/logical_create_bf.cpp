@@ -14,8 +14,7 @@ LogicalCreateBF::LogicalCreateBF() : LogicalExtensionOperator() {
 	message = "CREATE_BF";
 }
 
-LogicalCreateBF::LogicalCreateBF(const BloomFilterOperation &bf_op)
-    : LogicalExtensionOperator(), bf_operation(bf_op) {
+LogicalCreateBF::LogicalCreateBF(const BloomFilterOperation &bf_op) : LogicalExtensionOperator(), bf_operation(bf_op) {
 	this->type = LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR;
 	message = "CREATE_BF";
 }
@@ -29,9 +28,15 @@ InsertionOrderPreservingMap<string> LogicalCreateBF::ParamsToString() const {
 	vector<idx_t> seen_probe;
 	for (const auto &col : bf_operation.probe_columns) {
 		bool found = false;
-		for (auto idx : seen_probe) { if (idx == col.table_index) { found = true; break; } }
+		for (auto idx : seen_probe) {
+			if (idx == col.table_index) {
+				found = true;
+				break;
+			}
+		}
 		if (!found) {
-			if (!probe_tables.empty()) probe_tables += ", ";
+			if (!probe_tables.empty())
+				probe_tables += ", ";
 			probe_tables += to_string(col.table_index);
 			seen_probe.push_back(col.table_index);
 		}
@@ -43,15 +48,15 @@ InsertionOrderPreservingMap<string> LogicalCreateBF::ParamsToString() const {
 		if (i > 0) {
 			build_cols += ", ";
 		}
-		build_cols += "(" + to_string(bf_operation.build_columns[i].table_index) +
-					 "." + to_string(bf_operation.build_columns[i].column_index) + ")";
+		build_cols += "(" + to_string(bf_operation.build_columns[i].table_index) + "." +
+		              to_string(bf_operation.build_columns[i].column_index) + ")";
 	}
 	result["Build Columns"] = build_cols;
-	
+
 	if (estimated_cardinality != DConstants::INVALID_INDEX) {
 		result["Estimated Cardinality"] = std::to_string(estimated_cardinality);
 	}
-	
+
 	return result;
 }
 
@@ -83,11 +88,11 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 		// built.
 		// TODO: optimize: Use a map for bf_operation.build_columns to speed up lookup
 		vector<idx_t> resolved_indices;
-		for (const ColumnBinding &column_binding: bf_operation.build_columns) {
+		for (const ColumnBinding &column_binding : bf_operation.build_columns) {
 			// find the position of the bf column ColumnBinding in the chunk columns
 			for (idx_t i = 0; i < child_bindings.size(); i++) {
 				if (child_bindings[i].table_index == column_binding.table_index &&
-					child_bindings[i].column_index == column_binding.column_index) {
+				    child_bindings[i].column_index == column_binding.column_index) {
 					resolved_indices.push_back(i);
 					break;
 				}
@@ -96,17 +101,15 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 
 		// step 3: create physical operator with the resolved indices
 		PhysicalOperator &physical_op = generator.Make<PhysicalCreateBF>(
-			  make_shared_ptr<BloomFilterOperation>(bf_operation),
-			  types,
-			  estimated_cardinality,
-			  resolved_indices);
+		    make_shared_ptr<BloomFilterOperation>(bf_operation), types, estimated_cardinality, resolved_indices);
 		// auto filter_plan = BloomFilterOperationToFilterPlan(bf_operation);
-		// auto &physical_op = generator.Make<PhysicalCreateBF>(make_shared<BloomFilterOperation>(bf_operation), types, estimated_cardinality);
+		// auto &physical_op = generator.Make<PhysicalCreateBF>(make_shared<BloomFilterOperation>(bf_operation), types,
+		// estimated_cardinality);
 		for (auto &child : children) {
 			auto &child_physical = generator.CreatePlan(*child);
 			physical_op.children.emplace_back(child_physical);
 		}
-		physical = static_cast<PhysicalCreateBF*>(&physical_op);
+		physical = static_cast<PhysicalCreateBF *>(&physical_op);
 
 		// link back to related USE_BF operators
 		// the links are used to create pipeline dependencies

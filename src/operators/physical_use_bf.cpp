@@ -9,8 +9,8 @@
 
 namespace duckdb {
 
-PhysicalUseBF::PhysicalUseBF(PhysicalPlan &physical_plan, shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
-                             idx_t estimated_cardinality, vector<idx_t> bound_column_indices)
+PhysicalUseBF::PhysicalUseBF(PhysicalPlan &physical_plan, shared_ptr<BloomFilterOperation> bf_operation,
+                             vector<LogicalType> types, idx_t estimated_cardinality, vector<idx_t> bound_column_indices)
     : CachingPhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       bf_operation(std::move(bf_operation)), bound_column_indices(std::move(bound_column_indices)) {
 }
@@ -39,8 +39,8 @@ InsertionOrderPreservingMap<string> PhysicalUseBF::ParamsToString() const {
 		if (i > 0) {
 			probe_cols += ", ";
 		}
-		probe_cols += "(" + to_string(bf_operation->probe_columns[i].table_index) +
-					 "." + to_string(bf_operation->probe_columns[i].column_index) + ")";
+		probe_cols += "(" + to_string(bf_operation->probe_columns[i].table_index) + "." +
+		              to_string(bf_operation->probe_columns[i].column_index) + ")";
 	}
 	result["Probe Columns"] = probe_cols;
 
@@ -61,8 +61,8 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		profiling_checked = true;
 		auto prof = GetRPTProfilingState(context.client);
 		if (prof) {
-			profiling_stats = prof->RegisterUseBF(
-			    bf_operation->build_table_idx, bf_operation->probe_table_idx, bf_operation->sequence_number);
+			profiling_stats = prof->RegisterUseBF(bf_operation->build_table_idx, bf_operation->probe_table_idx,
+			                                      bf_operation->sequence_number);
 		}
 	}
 
@@ -84,10 +84,13 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 				for (auto *create_bf : related_create_bf_vec) {
 					auto bf = create_bf->GetBloomFilter(build_col);
 					if (bf) {
-						string build_table = create_bf->bf_operation ?
-							"table_" + std::to_string(create_bf->bf_operation->build_table_idx) : "unknown";
-						D_PRINTF("[EXEC_INTERNAL] USE_BF found bloom filter for col(%llu,%llu) from CREATE_BF (build=%s)",
-						         (unsigned long long)build_col.table_index, (unsigned long long)build_col.column_index, build_table.c_str());
+						string build_table = create_bf->bf_operation
+						                         ? "table_" + std::to_string(create_bf->bf_operation->build_table_idx)
+						                         : "unknown";
+						D_PRINTF(
+						    "[EXEC_INTERNAL] USE_BF found bloom filter for col(%llu,%llu) from CREATE_BF (build=%s)",
+						    (unsigned long long)build_col.table_index, (unsigned long long)build_col.column_index,
+						    build_table.c_str());
 						bf_state.bloom_filters.push_back(bf);
 						break; // found the filter for this column
 					}
@@ -102,8 +105,8 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 
 	// if no bloom filters or no input, just pass through
 	if (bf_state.bloom_filters.empty() || row_num == 0) {
-		D_PRINTF("[EXEC_INTERNAL] USE_BF (probe=%s) No bloom filter input/empty, row_num = %llu",
-		         table_name.c_str(), (unsigned long long)row_num);
+		D_PRINTF("[EXEC_INTERNAL] USE_BF (probe=%s) No bloom filter input/empty, row_num = %llu", table_name.c_str(),
+		         (unsigned long long)row_num);
 		if (profiling_stats) {
 			profiling_stats->rows_in.fetch_add(row_num, std::memory_order_relaxed);
 			profiling_stats->rows_out.fetch_add(row_num, std::memory_order_relaxed);
@@ -191,18 +194,20 @@ void PhysicalUseBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipelin
 
 #ifdef DEBUG
 	char ptr_str[32];
-	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
+	snprintf(ptr_str, sizeof(ptr_str), "%p", (void *)this);
 	string probe_table = bf_operation ? "table_" + std::to_string(bf_operation->probe_table_idx) : "unknown";
-	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s, this=%s) BuildPipelines called", probe_table.c_str(), ptr_str));
+	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s, this=%s) BuildPipelines called",
+	                                  probe_table.c_str(), ptr_str));
 #endif
 
 	auto &state = meta_pipeline.GetState();
 	state.AddPipelineOperator(current, *this);
 
 #ifdef DEBUG
-	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s, this=%s) added to current pipeline as operator", probe_table.c_str(), ptr_str));
+	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s, this=%s) added to current pipeline as operator",
+	                                  probe_table.c_str(), ptr_str));
 	Printer::Print(StringUtil::Format("[PIPELINE] USE_BF (probe=%s) has %zu related CREATE_BF operators",
-		probe_table.c_str(), related_create_bf_vec.size()));
+	                                  probe_table.c_str(), related_create_bf_vec.size()));
 #endif
 
 	// add dependencies on all related CREATE_BF operators

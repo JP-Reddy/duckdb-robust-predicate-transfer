@@ -7,19 +7,30 @@
 namespace duckdb {
 
 // helper to get operator type name for debug
-static const char* GetOpTypeName(LogicalOperatorType type) {
+static const char *GetOpTypeName(LogicalOperatorType type) {
 	switch (type) {
-	case LogicalOperatorType::LOGICAL_GET: return "GET";
-	case LogicalOperatorType::LOGICAL_FILTER: return "FILTER";
-	case LogicalOperatorType::LOGICAL_PROJECTION: return "PROJECTION";
-	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN: return "COMPARISON_JOIN";
-	case LogicalOperatorType::LOGICAL_DELIM_JOIN: return "DELIM_JOIN";
-	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY: return "AGGREGATE";
-	case LogicalOperatorType::LOGICAL_WINDOW: return "WINDOW";
-	case LogicalOperatorType::LOGICAL_UNION: return "UNION";
-	case LogicalOperatorType::LOGICAL_CHUNK_GET: return "CHUNK_GET";
-	case LogicalOperatorType::LOGICAL_DELIM_GET: return "DELIM_GET";
-	default: return "OTHER";
+	case LogicalOperatorType::LOGICAL_GET:
+		return "GET";
+	case LogicalOperatorType::LOGICAL_FILTER:
+		return "FILTER";
+	case LogicalOperatorType::LOGICAL_PROJECTION:
+		return "PROJECTION";
+	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
+		return "COMPARISON_JOIN";
+	case LogicalOperatorType::LOGICAL_DELIM_JOIN:
+		return "DELIM_JOIN";
+	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY:
+		return "AGGREGATE";
+	case LogicalOperatorType::LOGICAL_WINDOW:
+		return "WINDOW";
+	case LogicalOperatorType::LOGICAL_UNION:
+		return "UNION";
+	case LogicalOperatorType::LOGICAL_CHUNK_GET:
+		return "CHUNK_GET";
+	case LogicalOperatorType::LOGICAL_DELIM_GET:
+		return "DELIM_GET";
+	default:
+		return "OTHER";
 	}
 }
 
@@ -77,9 +88,8 @@ void TableManager::AddTableOperator(LogicalOperator *op) {
 	tbl_info.table_op = op;
 
 	if (table_idx != std::numeric_limits<idx_t>::max() && table_lookup.find(table_idx) == table_lookup.end()) {
-		D_PRINTF("[NODE_REG] AddTableOperator: type=%s, table_idx=%llu, cardinality=%llu",
-		         GetOpTypeName(op->type), (unsigned long long)table_idx,
-		         (unsigned long long)tbl_info.estimated_cardinality);
+		D_PRINTF("[NODE_REG] AddTableOperator: type=%s, table_idx=%llu, cardinality=%llu", GetOpTypeName(op->type),
+		         (unsigned long long)table_idx, (unsigned long long)tbl_info.estimated_cardinality);
 		table_lookup[table_idx] = tbl_info;
 		table_ops.push_back(tbl_info);
 	} else if (table_idx != std::numeric_limits<idx_t>::max()) {
@@ -94,13 +104,13 @@ TableInfo *TableManager::GetTableInfo(LogicalOperator *op) {
 	}
 
 	idx_t table_idx = GetScalarTableIndex(op);
-	if(table_lookup.find(table_idx) == table_lookup.end()) {
+	if (table_lookup.find(table_idx) == table_lookup.end()) {
 		return nullptr;
 	}
 	return &table_lookup[table_idx];
 }
 
-LogicalGet* TableManager::FindLogicalGet(LogicalOperator *op) {
+LogicalGet *TableManager::FindLogicalGet(LogicalOperator *op) {
 	if (!op) {
 		return nullptr;
 	}

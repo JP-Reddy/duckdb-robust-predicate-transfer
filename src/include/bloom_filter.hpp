@@ -18,10 +18,7 @@
 namespace duckdb {
 
 // Build strategy for bloom filter construction
-enum class BloomFilterBuildStrategy {
-	SINGLE_THREADED = 0,
-	PARALLEL = 1
-};
+enum class BloomFilterBuildStrategy { SINGLE_THREADED = 0, PARALLEL = 1 };
 
 class BloomFilter {
 public:
@@ -93,7 +90,8 @@ public:
 	virtual void PushNextBatch(size_t thread_id, DataChunk &chunk) = 0;
 
 	// clean up resources after building is complete
-	virtual void CleanUp() {}
+	virtual void CleanUp() {
+	}
 
 	virtual vector<idx_t> BuiltCols() const = 0;
 

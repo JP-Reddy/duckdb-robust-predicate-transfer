@@ -12,8 +12,9 @@
 
 namespace duckdb {
 
-PhysicalCreateBF::PhysicalCreateBF(PhysicalPlan &physical_plan, const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
-                                   idx_t estimated_cardinality, vector<idx_t> bound_column_indices)
+PhysicalCreateBF::PhysicalCreateBF(PhysicalPlan &physical_plan, const shared_ptr<BloomFilterOperation> bf_operation,
+                                   vector<LogicalType> types, idx_t estimated_cardinality,
+                                   vector<idx_t> bound_column_indices)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       bf_operation(bf_operation), is_probing_side(false), bound_column_indices(std::move(bound_column_indices)) {
 	// create bloom filter for each build column, keyed by ColumnBinding
@@ -24,13 +25,13 @@ PhysicalCreateBF::PhysicalCreateBF(PhysicalPlan &physical_plan, const shared_ptr
 }
 
 string PhysicalCreateBF::GetName() const {
-    return "CREATE_BF";
+	return "CREATE_BF";
 }
 
 string PhysicalCreateBF::ToString(ExplainFormat format) const {
-    string result = "CREATE_BF";
-    result += " [" + std::to_string(bf_operation->build_columns.size()) + " filters]";
-    return result;
+	string result = "CREATE_BF";
+	result += " [" + std::to_string(bf_operation->build_columns.size()) + " filters]";
+	return result;
 }
 
 InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
@@ -42,9 +43,15 @@ InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
 	vector<idx_t> seen_probe;
 	for (const auto &col : bf_operation->probe_columns) {
 		bool found = false;
-		for (auto idx : seen_probe) { if (idx == col.table_index) { found = true; break; } }
+		for (auto idx : seen_probe) {
+			if (idx == col.table_index) {
+				found = true;
+				break;
+			}
+		}
 		if (!found) {
-			if (!probe_tables.empty()) probe_tables += ", ";
+			if (!probe_tables.empty())
+				probe_tables += ", ";
 			probe_tables += to_string(col.table_index);
 			seen_probe.push_back(col.table_index);
 		}
@@ -56,8 +63,8 @@ InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
 		if (i > 0) {
 			build_cols += ", ";
 		}
-		build_cols += "(" + to_string(bf_operation->build_columns[i].table_index) +
-					 "." + to_string(bf_operation->build_columns[i].column_index) + ")";
+		build_cols += "(" + to_string(bf_operation->build_columns[i].table_index) + "." +
+		              to_string(bf_operation->build_columns[i].column_index) + ")";
 	}
 	result["Build Columns"] = build_cols;
 
@@ -72,25 +79,22 @@ InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
 // Sink
 //===--------------------------------------------------------------------===//
 
-CreateBFGlobalSinkState::CreateBFGlobalSinkState(ClientContext &context, const PhysicalCreateBF &op)
-	: op(op){
+CreateBFGlobalSinkState::CreateBFGlobalSinkState(ClientContext &context, const PhysicalCreateBF &op) : op(op) {
 	total_data = make_uniq<ColumnDataCollection>(context, op.types);
 }
 
- CreateBFLocalSinkState::CreateBFLocalSinkState(ClientContext &context, const PhysicalCreateBF &op)
-	 : client_context(context){
+CreateBFLocalSinkState::CreateBFLocalSinkState(ClientContext &context, const PhysicalCreateBF &op)
+    : client_context(context) {
 	local_data = make_uniq<ColumnDataCollection>(client_context, op.types);
 }
-
-
 
 SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	if (!profiling_checked) {
 		profiling_checked = true;
 		auto prof = GetRPTProfilingState(context.client);
 		if (prof) {
-			profiling_stats = prof->RegisterCreateBF(
-			    bf_operation->build_table_idx, bf_operation->probe_columns, bf_operation->sequence_number);
+			profiling_stats = prof->RegisterCreateBF(bf_operation->build_table_idx, bf_operation->probe_columns,
+			                                         bf_operation->sequence_number);
 		}
 	}
 
@@ -99,8 +103,7 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
 		ScopedTimer timer(profiling_stats->sink_time_us);
 		profiling_stats->rows_materialized.fetch_add(chunk.size(), std::memory_order_relaxed);
 		local_state.local_data->Append(chunk);
-	}
-	else {
+	} else {
 		local_state.local_data->Append(chunk);
 	}
 	return SinkResultType::NEED_MORE_INPUT;
@@ -111,7 +114,7 @@ SinkCombineResultType PhysicalCreateBF::Combine(ExecutionContext &context, Opera
 	CreateBFLocalSinkState &local_state = input.local_state.Cast<CreateBFLocalSinkState>();
 	lock_guard<mutex> lock(gstate.glock);
 	gstate.local_data_collections.emplace_back(std::move(local_state.local_data));
-    return SinkCombineResultType::FINISHED;
+	return SinkCombineResultType::FINISHED;
 }
 
 //===--------------------------------------------------------------------===//
@@ -121,11 +124,9 @@ SinkCombineResultType PhysicalCreateBF::Combine(ExecutionContext &context, Opera
 class CreateBFFinalizeTask : public ExecutorTask {
 public:
 	CreateBFFinalizeTask(shared_ptr<Event> event_p, ClientContext &context, CreateBFGlobalSinkState &sink_p,
-		idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, size_t thread_id_p)
-			: ExecutorTask(context, event_p, sink_p.op), event(std::move(event_p)), sink(sink_p),
-			  chunk_idx_from(chunk_idx_from_p), chunk_idx_to(chunk_idx_to_p),
-			  thread_id(thread_id_p) {
-
+	                     idx_t chunk_idx_from_p, idx_t chunk_idx_to_p, size_t thread_id_p)
+	    : ExecutorTask(context, event_p, sink_p.op), event(std::move(event_p)), sink(sink_p),
+	      chunk_idx_from(chunk_idx_from_p), chunk_idx_to(chunk_idx_to_p), thread_id(thread_id_p) {
 	}
 
 	TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
@@ -158,7 +159,7 @@ private:
 class CreateBFFinalizeEvent : public BasePipelineEvent {
 public:
 	CreateBFFinalizeEvent(Pipeline &pipeline_p, CreateBFGlobalSinkState &sink)
-		: BasePipelineEvent(pipeline_p), sink(sink) {
+	    : BasePipelineEvent(pipeline_p), sink(sink) {
 	}
 
 	CreateBFGlobalSinkState &sink;
@@ -172,12 +173,12 @@ public:
 		const auto chunk_count = buffer->ChunkCount();
 
 		const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
-		if (num_threads == 1 || (buffer->Count() < PARALLEL_CONSTRUCT_THRESHOLD && !context.config.verify_parallelism)) {
+		if (num_threads == 1 ||
+		    (buffer->Count() < PARALLEL_CONSTRUCT_THRESHOLD && !context.config.verify_parallelism)) {
 			// single threaded finalize
-			finalize_tasks.push_back(make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink,
-				0, chunk_count, /*thread_id=*/0));
-		}
-		else {
+			finalize_tasks.push_back(
+			    make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink, 0, chunk_count, /*thread_id=*/0));
+		} else {
 			// parallel finalize
 			auto chunks_per_thread = (chunk_count + num_threads - 1) / num_threads;
 
@@ -185,8 +186,8 @@ public:
 			for (idx_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
 				idx_t chunk_idx_from = chunk_idx;
 				idx_t chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_thread, chunk_count);
-				finalize_tasks.push_back(make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink,
-					chunk_idx_from, chunk_idx_to, /*thread_id=*/thread_idx));
+				finalize_tasks.push_back(make_uniq<CreateBFFinalizeTask>(
+				    shared_from_this(), context, sink, chunk_idx_from, chunk_idx_to, /*thread_id=*/thread_idx));
 				chunk_idx = chunk_idx_to;
 				if (chunk_idx == chunk_count) {
 					break;
@@ -206,9 +207,10 @@ public:
 		}
 
 		// mark all bloom filters as finalized after parallel building completes
-		string build_table = sink.op.bf_operation ? "table_" + std::to_string(sink.op.bf_operation->build_table_idx) : "unknown";
-		D_PRINTF("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters",
-		         build_table.c_str(), sink.op.bloom_filter_map.size());
+		string build_table =
+		    sink.op.bf_operation ? "table_" + std::to_string(sink.op.bf_operation->build_table_idx) : "unknown";
+		D_PRINTF("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters", build_table.c_str(),
+		         sink.op.bloom_filter_map.size());
 
 		for (auto &entry : sink.op.bloom_filter_map) {
 			const ColumnBinding &col = entry.first;
@@ -217,7 +219,8 @@ public:
 				bf->Fold();
 				bf->finalized_ = true;
 				D_PRINTF("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) folded and finalized",
-				         build_table.c_str(), (unsigned long long)col.table_index, (unsigned long long)col.column_index);
+				         build_table.c_str(), (unsigned long long)col.table_index,
+				         (unsigned long long)col.column_index);
 			}
 		}
 	}
@@ -231,7 +234,6 @@ void CreateBFGlobalSinkState::ScheduleFinalize(Pipeline &pipeline, Event &event)
 	event.InsertEvent(std::move(new_event));
 }
 
-
 SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
                                             OperatorSinkFinalizeInput &input) const {
 	// lazy init profiling if Sink was never called (e.g., empty input)
@@ -239,8 +241,8 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 		profiling_checked = true;
 		auto prof = GetRPTProfilingState(context);
 		if (prof) {
-			profiling_stats = prof->RegisterCreateBF(
-			    bf_operation->build_table_idx, bf_operation->probe_columns, bf_operation->sequence_number);
+			profiling_stats = prof->RegisterCreateBF(bf_operation->build_table_idx, bf_operation->probe_columns,
+			                                         bf_operation->sequence_number);
 		}
 	}
 
@@ -261,8 +263,8 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 	}
 
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	D_PRINTF("[FINALIZE] CREATE_BF (build=%s): total_data contains %llu rows",
-	         build_table.c_str(), (unsigned long long)gsink.total_data->Count());
+	D_PRINTF("[FINALIZE] CREATE_BF (build=%s): total_data contains %llu rows", build_table.c_str(),
+	         (unsigned long long)gsink.total_data->Count());
 
 	gsink.local_data_collections.clear();
 
@@ -318,7 +320,7 @@ shared_ptr<BloomFilter> PhysicalCreateBF::GetBloomFilter(const ColumnBinding &co
 //===--------------------------------------------------------------------===//
 
 CreateBFGlobalSourceState::CreateBFGlobalSourceState(ClientContext &context, const PhysicalCreateBF &op)
-	: context(context) {
+    : context(context) {
 	D_ASSERT(op.sink_state);
 	auto &gstate = op.sink_state->Cast<CreateBFGlobalSinkState>();
 	gstate.total_data->InitializeScan(scan_state);
@@ -340,14 +342,15 @@ unique_ptr<GlobalSourceState> PhysicalCreateBF::GetGlobalSourceState(ClientConte
 
 #ifdef DEBUG
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) GetGlobalSourceState: chunk_count=%llu, row_count=%llu",
-		build_table.c_str(), (unsigned long long)chunk_count, (unsigned long long)row_count));
+	Printer::Print(
+	    StringUtil::Format("[SOURCE] CREATE_BF (build=%s) GetGlobalSourceState: chunk_count=%llu, row_count=%llu",
+	                       build_table.c_str(), (unsigned long long)chunk_count, (unsigned long long)row_count));
 #endif
 
 	const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
 	auto chunks_per_thread = MaxValue<idx_t>((chunk_count + num_threads - 1) / num_threads, 1);
 	idx_t chunk_idx = 0;
-	for(idx_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+	for (idx_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
 		if (chunk_idx == chunk_count) {
 			break;
 		}
@@ -356,21 +359,22 @@ unique_ptr<GlobalSourceState> PhysicalCreateBF::GetGlobalSourceState(ClientConte
 		state->chunks_todo.emplace_back(chunk_idx_from, chunk_idx_to);
 #ifdef DEBUG
 		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Partition %llu: chunks [%llu, %llu)",
-			build_table.c_str(), (unsigned long long)thread_idx, (unsigned long long)chunk_idx_from, (unsigned long long)chunk_idx_to));
+		                                  build_table.c_str(), (unsigned long long)thread_idx,
+		                                  (unsigned long long)chunk_idx_from, (unsigned long long)chunk_idx_to));
 #endif
 		chunk_idx = chunk_idx_to;
 	}
 	return unique_ptr_cast<CreateBFGlobalSourceState, GlobalSourceState>(std::move(state));
 }
 
-unique_ptr<LocalSourceState> PhysicalCreateBF::GetLocalSourceState(
-	ExecutionContext &context, GlobalSourceState &gstate) const {
+unique_ptr<LocalSourceState> PhysicalCreateBF::GetLocalSourceState(ExecutionContext &context,
+                                                                   GlobalSourceState &gstate) const {
 	return make_uniq<CreateBFLocalSourceState>();
 }
 
 // TODO: fetch the chunks parallely
-SourceResultType PhysicalCreateBF::GetDataInternal(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const {
-
+SourceResultType PhysicalCreateBF::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                                   OperatorSourceInput &input) const {
 	auto &gstate = sink_state->Cast<CreateBFGlobalSinkState>();
 	auto &lstate = input.local_state.Cast<CreateBFLocalSourceState>();
 	auto &state = input.global_state.Cast<CreateBFGlobalSourceState>();
@@ -379,13 +383,14 @@ SourceResultType PhysicalCreateBF::GetDataInternal(ExecutionContext &context, Da
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 #endif
 
-	if(lstate.initial) {
+	if (lstate.initial) {
 		lstate.local_partition_id = state.partition_id.fetch_add(1);
 		lstate.initial = false;
 
 #ifdef DEBUG
-		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) GetData initial: partition_id=%llu, chunks_todo.size()=%zu",
-			build_table.c_str(), (unsigned long long)lstate.local_partition_id, state.chunks_todo.size()));
+		Printer::Print(StringUtil::Format(
+		    "[SOURCE] CREATE_BF (build=%s) GetData initial: partition_id=%llu, chunks_todo.size()=%zu",
+		    build_table.c_str(), (unsigned long long)lstate.local_partition_id, state.chunks_todo.size()));
 #endif
 
 		if (lstate.local_partition_id >= state.chunks_todo.size()) {
@@ -400,7 +405,8 @@ SourceResultType PhysicalCreateBF::GetDataInternal(ExecutionContext &context, Da
 
 #ifdef DEBUG
 		Printer::Print(StringUtil::Format("[SOURCE] CREATE_BF (build=%s) Assigned range: [%llu, %llu)",
-			build_table.c_str(), (unsigned long long)lstate.chunk_from, (unsigned long long)lstate.chunk_to));
+		                                  build_table.c_str(), (unsigned long long)lstate.chunk_from,
+		                                  (unsigned long long)lstate.chunk_to));
 #endif
 	}
 
@@ -456,11 +462,9 @@ void PhysicalCreateBF::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipe
 		D_PRINTF("[PIPELINE] CREATE_BF (build=%s) adding existing child pipeline as dependency", build_table.c_str());
 		current.AddDependency(this_pipeline);
 	}
-
 }
 
-void PhysicalCreateBF::BuildPipelinesFromRelated(Pipeline &current,
-												   MetaPipeline &meta_pipeline) {
+void PhysicalCreateBF::BuildPipelinesFromRelated(Pipeline &current, MetaPipeline &meta_pipeline) {
 	op_state.reset();
 
 	D_ASSERT(children.size() == 1);
@@ -468,8 +472,10 @@ void PhysicalCreateBF::BuildPipelinesFromRelated(Pipeline &current,
 #ifdef DEBUG
 	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
 	char ptr_str[32];
-	snprintf(ptr_str, sizeof(ptr_str), "%p", (void*)this);
-	Printer::Print(StringUtil::Format("[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelinesFromRelated - USE_BF needs this filter", build_table.c_str(), ptr_str));
+	snprintf(ptr_str, sizeof(ptr_str), "%p", (void *)this);
+	Printer::Print(StringUtil::Format(
+	    "[PIPELINE] CREATE_BF (build=%s, this=%s) BuildPipelinesFromRelated - USE_BF needs this filter",
+	    build_table.c_str(), ptr_str));
 #endif
 
 	if (this_pipeline == nullptr) {

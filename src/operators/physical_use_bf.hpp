@@ -13,8 +13,8 @@ class PhysicalCreateBF;
 class PhysicalUseBFState : public CachingOperatorState {
 public:
 	PhysicalUseBFState()
-	    : bloom_filters_initialized(false),
-	      sel(STANDARD_VECTOR_SIZE), bit_vector((STANDARD_VECTOR_SIZE + 7) / 8) {}
+	    : bloom_filters_initialized(false), sel(STANDARD_VECTOR_SIZE), bit_vector((STANDARD_VECTOR_SIZE + 7) / 8) {
+	}
 
 	vector<shared_ptr<BloomFilter>> bloom_filters;
 	bool bloom_filters_initialized;
@@ -30,7 +30,7 @@ public:
 
 public:
 	PhysicalUseBF(PhysicalPlan &physical_plan, shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
-	             idx_t estimated_cardinality, vector<idx_t> bound_column_indices);
+	              idx_t estimated_cardinality, vector<idx_t> bound_column_indices);
 
 	// required virtual methods
 	virtual ~PhysicalUseBF() = default;
@@ -62,7 +62,7 @@ public:
 	vector<idx_t> bound_column_indices;
 
 	// references to related CREATE_BF operators
-	vector<PhysicalCreateBF*> related_create_bf_vec;
+	vector<PhysicalCreateBF *> related_create_bf_vec;
 	mutable PhysicalCreateBF *related_create_bf = nullptr;
 
 	// profiling

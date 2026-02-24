@@ -22,7 +22,7 @@ public:
 	std::string GetName() override {
 		return "logical_create_bf";
 	}
-	
+
 	unique_ptr<LogicalExtensionOperator> Deserialize(Deserializer &deserializer) override {
 		return make_uniq<LogicalCreateBF>();
 	}
@@ -33,7 +33,7 @@ public:
 	std::string GetName() override {
 		return "logical_use_bf";
 	}
-	
+
 	unique_ptr<LogicalExtensionOperator> Deserialize(Deserializer &deserializer) override {
 		return make_uniq<LogicalUseBF>();
 	}
@@ -54,10 +54,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register profiling setting
 	auto &config = DBConfig::GetConfig(instance);
-	config.AddExtensionOption("rpt_profiling", "Enable RPT extension profiling output",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
-	config.AddExtensionOption("rpt_display_dag", "Display RPT transfer DAG",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
+	config.AddExtensionOption("rpt_profiling", "Enable RPT extension profiling output", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(false));
+	config.AddExtensionOption("rpt_display_dag", "Display RPT transfer DAG", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(false));
 }
 
 void RptExtension::Load(ExtensionLoader &loader) {

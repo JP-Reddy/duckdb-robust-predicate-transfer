@@ -10,14 +10,13 @@ namespace duckdb {
 
 struct CreateBFStats;
 
-
 class PhysicalCreateBF : public PhysicalOperator {
 public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 public:
-	PhysicalCreateBF(PhysicalPlan &physical_plan, const shared_ptr<BloomFilterOperation> bf_operation, vector<LogicalType> types,
-	                 idx_t estimated_cardinality, vector<idx_t> bound_column_indices);
+	PhysicalCreateBF(PhysicalPlan &physical_plan, const shared_ptr<BloomFilterOperation> bf_operation,
+	                 vector<LogicalType> types, idx_t estimated_cardinality, vector<idx_t> bound_column_indices);
 
 	// Required virtual methods
 	virtual ~PhysicalCreateBF() = default;
@@ -36,7 +35,6 @@ public:
 	SinkFinalizeType Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
 	                          OperatorSinkFinalizeInput &input) const override;
 
-
 	bool IsSink() const override {
 		return true;
 	}
@@ -47,9 +45,9 @@ public:
 	// source interface
 	unique_ptr<GlobalSourceState> GetGlobalSourceState(ClientContext &context) const override;
 	unique_ptr<LocalSourceState> GetLocalSourceState(ExecutionContext &context,
-							  GlobalSourceState &gstate) const override;
+	                                                 GlobalSourceState &gstate) const override;
 	SourceResultType GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-				OperatorSourceInput &input) const override;
+	                                 OperatorSourceInput &input) const override;
 
 	bool IsSource() const override {
 		return true;

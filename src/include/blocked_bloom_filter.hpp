@@ -97,7 +97,8 @@ inline int Log2Floor(int64_t n) {
 
 // ceil(log2(n)) — returns the number of bits needed to represent n values
 inline int Log2Ceil(int64_t n) {
-	if (n <= 1) return 0;
+	if (n <= 1)
+		return 0;
 	return Log2Floor(n - 1) + 1;
 }
 
@@ -105,7 +106,7 @@ inline int Log2Ceil(int64_t n) {
 // masks are 57 bits long so they can be accessed at arbitrary bit offsets via unaligned 64-bit load.
 struct BloomFilterMasks {
 	BloomFilterMasks() {
-		std::seed_seq seed{0, 0, 0, 0, 0, 0, 0, 0};
+		std::seed_seq seed {0, 0, 0, 0, 0, 0, 0, 0};
 		std::mt19937 re(seed);
 		std::uniform_int_distribution<uint64_t> rd;
 		auto random = [&re, &rd](int min_value, int max_value) {
@@ -173,13 +174,13 @@ struct BloomFilterMasks {
 // 1 cache access per key, 8 bits per key, with folding for sparse filters.
 class BlockedBloomFilter {
 public:
-	BlockedBloomFilter() : log_num_blocks_(0), num_blocks_(0), blocks_(nullptr) {}
+	BlockedBloomFilter() : log_num_blocks_(0), num_blocks_(0), blocks_(nullptr) {
+	}
 
 	void CreateEmpty(int64_t num_rows_to_insert) {
 		constexpr int64_t min_num_bits_per_key = 8;
 		constexpr int64_t min_num_bits = 512;
-		int64_t desired_num_bits =
-		    std::max(min_num_bits, num_rows_to_insert * min_num_bits_per_key);
+		int64_t desired_num_bits = std::max(min_num_bits, num_rows_to_insert * min_num_bits_per_key);
 		int log_num_bits = Log2Ceil(desired_num_bits);
 
 		log_num_blocks_ = log_num_bits - 6;
@@ -273,8 +274,7 @@ public:
 			}
 
 			int num_folds = 1;
-			while ((log_num_blocks_ - num_folds) > log_num_blocks_min &&
-			       (4 * num_bits_set) < (num_bits >> num_folds)) {
+			while ((log_num_blocks_ - num_folds) > log_num_blocks_min && (4 * num_bits_set) < (num_bits >> num_folds)) {
 				++num_folds;
 			}
 

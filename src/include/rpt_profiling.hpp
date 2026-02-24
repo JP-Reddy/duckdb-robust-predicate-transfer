@@ -17,19 +17,19 @@ struct CreateBFStats {
 	idx_t sequence_number = 0;
 	idx_t build_table_idx = 0;
 	vector<idx_t> probe_table_indices;
-	std::atomic<idx_t> rows_materialized{0};
-	std::atomic<int64_t> sink_time_us{0};
-	std::atomic<int64_t> finalize_time_us{0};
-	std::atomic<int64_t> source_time_us{0};
+	std::atomic<idx_t> rows_materialized {0};
+	std::atomic<int64_t> sink_time_us {0};
+	std::atomic<int64_t> finalize_time_us {0};
+	std::atomic<int64_t> source_time_us {0};
 };
 
 struct UseBFStats {
 	idx_t sequence_number = 0;
 	idx_t build_table_idx = 0;
 	idx_t probe_table_idx = 0;
-	std::atomic<idx_t> rows_in{0};
-	std::atomic<idx_t> rows_out{0};
-	std::atomic<int64_t> probe_time_us{0};
+	std::atomic<idx_t> rows_in {0};
+	std::atomic<idx_t> rows_out {0};
+	std::atomic<int64_t> probe_time_us {0};
 };
 
 // RAII timer that adds elapsed microseconds to an atomic counter
@@ -42,15 +42,15 @@ struct ScopedTimer {
 	}
 	~ScopedTimer() {
 		auto end = std::chrono::high_resolution_clock::now();
-		target.fetch_add(
-		    std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(),
-		    std::memory_order_relaxed);
+		target.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(),
+		                 std::memory_order_relaxed);
 	}
 };
 
 class RPTProfilingState : public ClientContextState {
 public:
-	explicit RPTProfilingState(bool enabled) : enabled(enabled) {}
+	explicit RPTProfilingState(bool enabled) : enabled(enabled) {
+	}
 
 	bool enabled;
 	int64_t optimizer_time_us = 0;
@@ -70,8 +70,7 @@ public:
 		return "table_" + std::to_string(table_idx);
 	}
 
-	shared_ptr<CreateBFStats> RegisterCreateBF(idx_t build_table_idx,
-	                                           const vector<ColumnBinding> &probe_columns,
+	shared_ptr<CreateBFStats> RegisterCreateBF(idx_t build_table_idx, const vector<ColumnBinding> &probe_columns,
 	                                           idx_t sequence_number) {
 		lock_guard<mutex> lock(stats_lock);
 		auto stats = make_shared_ptr<CreateBFStats>();
@@ -79,12 +78,14 @@ public:
 		stats->build_table_idx = build_table_idx;
 		// extract unique probe table indices from probe columns
 		for (const auto &col : probe_columns) {
-			if (stats->probe_table_indices.empty() ||
-			    stats->probe_table_indices.back() != col.table_index) {
+			if (stats->probe_table_indices.empty() || stats->probe_table_indices.back() != col.table_index) {
 				// check if already present
 				bool found = false;
 				for (auto idx : stats->probe_table_indices) {
-					if (idx == col.table_index) { found = true; break; }
+					if (idx == col.table_index) {
+						found = true;
+						break;
+					}
 				}
 				if (!found) {
 					stats->probe_table_indices.push_back(col.table_index);
@@ -130,9 +131,8 @@ public:
 		for (size_t i = 0; i < use_bf_stats.size(); i++) {
 			entries.push_back({use_bf_stats[i]->sequence_number, false, i});
 		}
-		std::sort(entries.begin(), entries.end(), [](const StatsEntry &a, const StatsEntry &b) {
-			return a.seq < b.seq;
-		});
+		std::sort(entries.begin(), entries.end(),
+		          [](const StatsEntry &a, const StatsEntry &b) { return a.seq < b.seq; });
 
 		int64_t total_rows_in = 0, total_rows_out = 0;
 		int64_t total_probe_us = 0;
@@ -144,17 +144,17 @@ public:
 				auto &s = create_bf_stats[e.idx];
 				string probe_names;
 				for (size_t pi = 0; pi < s->probe_table_indices.size(); pi++) {
-					if (pi > 0) probe_names += ",";
+					if (pi > 0)
+						probe_names += ",";
 					probe_names += GetName(s->probe_table_indices[pi]);
 				}
-				if (probe_names.empty()) probe_names = "?";
-				Printer::PrintF("CREATE_BF: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
-				    GetName(s->build_table_idx).c_str(),
-				    probe_names.c_str(),
-				    (unsigned long long)s->rows_materialized.load(),
-				    (long long)s->sink_time_us.load(),
-				    (long long)s->finalize_time_us.load(),
-				    (long long)s->source_time_us.load());
+				if (probe_names.empty())
+					probe_names = "?";
+				Printer::PrintF(
+				    "CREATE_BF: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
+				    GetName(s->build_table_idx).c_str(), probe_names.c_str(),
+				    (unsigned long long)s->rows_materialized.load(), (long long)s->sink_time_us.load(),
+				    (long long)s->finalize_time_us.load(), (long long)s->source_time_us.load());
 				total_sink_us += s->sink_time_us.load();
 				total_source_us += s->source_time_us.load();
 				total_finalize_us += s->finalize_time_us.load();
@@ -164,10 +164,9 @@ public:
 				idx_t ro = s->rows_out.load();
 				double sel = ri > 0 ? 100.0 * (double)ro / ri : 0.0;
 				Printer::PrintF("USE_BF:    [build=%s, probe=%s] in=%llu, out=%llu, sel=%.1f%%, probe=%lldus",
-				    GetName(s->build_table_idx).c_str(),
-				    GetName(s->probe_table_idx).c_str(),
-				    (unsigned long long)ri, (unsigned long long)ro, sel,
-				    (long long)s->probe_time_us.load());
+				                GetName(s->build_table_idx).c_str(), GetName(s->probe_table_idx).c_str(),
+				                (unsigned long long)ri, (unsigned long long)ro, sel,
+				                (long long)s->probe_time_us.load());
 				total_rows_in += ri;
 				total_rows_out += ro;
 				total_probe_us += s->probe_time_us.load();
@@ -182,7 +181,7 @@ public:
 		if (total_rows_in > 0) {
 			double filtered_pct = 100.0 * (1.0 - (double)total_rows_out / total_rows_in);
 			Printer::PrintF("  filtered: %lld / %lld rows (%.1f%% removed)",
-			    (long long)(total_rows_in - total_rows_out), (long long)total_rows_in, filtered_pct);
+			                (long long)(total_rows_in - total_rows_out), (long long)total_rows_in, filtered_pct);
 		}
 		Printer::Print("=== END RPT PROFILING ===\n");
 	}
