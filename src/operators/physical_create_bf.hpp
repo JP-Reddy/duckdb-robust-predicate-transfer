@@ -68,14 +68,14 @@ public:
 	// maps the column indices to resolved chunk column positions
 	vector<idx_t> bound_column_indices;
 
-	// column-keyed bloom filter map: ColumnBinding -> BloomFilter
-	unordered_map<ColumnBinding, shared_ptr<BloomFilter>, ColumnBindingHash, ColumnBindingEqual> bloom_filter_map;
+	// column-keyed bloom filter map: ColumnBinding -> PTBloomFilter
+	unordered_map<ColumnBinding, shared_ptr<PTBloomFilter>, ColumnBindingHash, ColumnBindingEqual> bloom_filter_map;
 
 	// pipeline reference
 	shared_ptr<Pipeline> this_pipeline;
 
 	// lookup bloom filter by the column it was built on
-	shared_ptr<BloomFilter> GetBloomFilter(const ColumnBinding &col) const;
+	shared_ptr<PTBloomFilter> GetBloomFilter(const ColumnBinding &col) const;
 
 	// profiling
 	mutable shared_ptr<CreateBFStats> profiling_stats;
@@ -98,7 +98,13 @@ public:
 	const PhysicalCreateBF &op;
 	mutex glock;
 	mutex bf_lock;
-	vector<shared_ptr<BloomFilterBuilder>> bf_builders;
+
+	// bloom filter insert info for finalize tasks
+	struct BFInsertInfo {
+		shared_ptr<PTBloomFilter> bf;
+		vector<idx_t> bound_cols;
+	};
+	unordered_map<ColumnBinding, BFInsertInfo, ColumnBindingHash, ColumnBindingEqual> bf_insert_info;
 
 	// store data for sink phase
 	unique_ptr<ColumnDataCollection> total_data;
@@ -130,7 +136,7 @@ public:
 	ColumnDataScanState scan_state;
 	vector<pair<idx_t, idx_t>> chunks_todo;
 	std::atomic<idx_t> partition_id;
-	vector<shared_ptr<BloomFilter>> bloom_filters;
+	vector<shared_ptr<PTBloomFilter>> bloom_filters;
 	mutex bf_lock;
 };
 

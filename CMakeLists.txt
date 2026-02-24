@@ -19,7 +19,6 @@ include_directories(src/include)
 set(EXTENSION_SOURCES
     src/rpt_extension.cpp
     src/bloom_filter.cpp
-    src/partition_util.cpp
     src/operators/logical_create_bf.cpp
     src/operators/physical_create_bf.cpp
     src/operators/logical_use_bf.cpp
@@ -47,7 +46,6 @@ option(BUILD_BLOOM_FILTER_BENCHMARK "Build the bloom filter benchmark" OFF)
 if(BUILD_BLOOM_FILTER_BENCHMARK)
     add_executable(bloom_filter_benchmark
         src/benchmark/bloom_filter_benchmark.cpp
-        src/partition_util.cpp
         src/bloom_filter.cpp
     )
     target_include_directories(bloom_filter_benchmark PRIVATE

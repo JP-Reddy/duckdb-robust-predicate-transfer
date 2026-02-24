@@ -16,7 +16,7 @@ public:
 	    : bloom_filters_initialized(false), sel(STANDARD_VECTOR_SIZE), bit_vector((STANDARD_VECTOR_SIZE + 7) / 8) {
 	}
 
-	vector<shared_ptr<BloomFilter>> bloom_filters;
+	vector<shared_ptr<PTBloomFilter>> bloom_filters;
 	bool bloom_filters_initialized;
 
 	// reusable buffers to avoid per-chunk heap allocations
