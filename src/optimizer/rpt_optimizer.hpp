@@ -54,12 +54,16 @@ public:
 	TreeNode *BuildRootedTree(vector<JoinEdge> &mst_edges) const;
 
 	// void CreateForwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
-	// 														const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding>
-	// &larger_columns, 														unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &forward_pass);
+	// 														const vector<ColumnBinding> &smaller_columns, const
+	// vector<ColumnBinding>
+	// &larger_columns, 														unordered_map<LogicalOperator*,
+	// unique_ptr<LogicalOperator>> &forward_pass);
 	//
 	// void CreateBackwardPassModifications(LogicalOperator *smaller_table_op, LogicalOperator *larger_table_op,
-	// 														const vector<ColumnBinding> &smaller_columns, const vector<ColumnBinding>
-	// &larger_columns, 														unordered_map<LogicalOperator*, unique_ptr<LogicalOperator>> &backward_pass);
+	// 														const vector<ColumnBinding> &smaller_columns, const
+	// vector<ColumnBinding>
+	// &larger_columns, 														unordered_map<LogicalOperator*,
+	// unique_ptr<LogicalOperator>> &backward_pass);
 	//
 	std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
 	          unordered_map<LogicalOperator *, vector<BloomFilterOperation>>>
