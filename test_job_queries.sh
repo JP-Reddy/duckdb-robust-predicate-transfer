@@ -114,25 +114,46 @@ run_query() {
     fi
 }
 
-# Run a query with timing (runs $RUNS times, returns minimum)
+# Run a query with timing using DuckDB's built-in profiling (runs $RUNS times, returns minimum)
 run_query_timed() {
     local query="$1"
     local with_extension="$2"
     local output_file="$3"
 
+    local prof_dir=$(mktemp -d /tmp/prof_XXXXXXXX)
+    local prof_file="$prof_dir/profile.json"
     local min_time=""
+
     for ((r=1; r<=RUNS; r++)); do
-        local start_time=$(python3 -c "import time; print(time.time())")
-        run_query "$query" "$with_extension" "$output_file"
-        local end_time=$(python3 -c "import time; print(time.time())")
-        local elapsed=$(echo "scale=6; $end_time - $start_time" | bc)
-        if [ -z "$min_time" ]; then
-            min_time="$elapsed"
+        if [ "$with_extension" = "true" ]; then
+            "$DUCKDB" "$DB" -unsigned -noheader -list -c "
+LOAD '$EXT';
+PRAGMA enable_profiling='json';
+PRAGMA profiling_output='$prof_file';
+$query" 2>/dev/null > "$output_file" || true
         else
-            min_time=$(python3 -c "print(min($min_time, $elapsed))")
+            "$DUCKDB" "$DB" -unsigned -noheader -list -c "
+PRAGMA enable_profiling='json';
+PRAGMA profiling_output='$prof_file';
+$query" 2>/dev/null > "$output_file" || true
+        fi
+
+        # extract query execution time from profiling JSON
+        local elapsed=$(python3 -c "
+import json, sys
+try:
+    with open('$prof_file') as f:
+        d = json.load(f)
+    print(d.get('latency', 0))
+except:
+    print(0)
+")
+        if [ -z "$min_time" ] || [ "$(python3 -c "print(1 if $elapsed < $min_time else 0)")" = "1" ]; then
+            min_time="$elapsed"
         fi
     done
 
+    rm -rf "$prof_dir"
     echo "scale=3; $min_time / 1" | bc
 }
 
@@ -178,7 +199,6 @@ test_query() {
     
     mkdir -p "$RESULTS_DIR/baseline"
 
-    # Run with extension
     if [ "$TIMING" = "true" ]; then
         local baseline_time=$(run_query_timed "$query" "false" "$baseline_file")
         local rpt_time=$(run_query_timed "$query" "true" "$rpt_file")
