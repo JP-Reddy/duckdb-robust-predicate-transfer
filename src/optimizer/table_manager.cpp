@@ -1,6 +1,5 @@
 #include "table_manager.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
-#include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "debug_utils.hpp"
 
@@ -52,25 +51,7 @@ idx_t TableManager::GetScalarTableIndex(LogicalOperator *op) {
 		return op->GetTableIndex()[0];
 	}
 	case LogicalOperatorType::LOGICAL_FILTER: {
-		// handle FILTER cases like reference impl's GetTableIndexinFilter
-		LogicalOperator *child = op->children[0].get();
-		if (child->type == LogicalOperatorType::LOGICAL_GET) {
-			// FILTER → GET: get table index from GET
-			return child->Cast<LogicalGet>().GetTableIndex()[0];
-		} else if (child->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN ||
-		           child->type == LogicalOperatorType::LOGICAL_DELIM_JOIN) {
-			// FILTER → JOIN (e.g., MARK join for IN clause): get table index from join's left child
-			LogicalOperator *join_left = child->children[0].get();
-			if (join_left->type == LogicalOperatorType::LOGICAL_GET) {
-				return join_left->Cast<LogicalGet>().GetTableIndex()[0];
-			}
-			// recurse further if needed
-			return GetScalarTableIndex(join_left);
-		} else if (child->type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
-			return child->GetTableIndex()[0];
-		}
-		// default: recurse into child
-		return GetScalarTableIndex(child);
+		return GetScalarTableIndex(op->children[0].get());
 	}
 	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY: {
 		return op->GetTableIndex()[1];

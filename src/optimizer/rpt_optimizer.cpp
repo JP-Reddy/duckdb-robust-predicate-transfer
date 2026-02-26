@@ -73,20 +73,7 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 	case LogicalOperatorType::LOGICAL_FILTER: {
 		LogicalOperator *child = op->children[0].get();
 		if (child->type == LogicalOperatorType::LOGICAL_GET) {
-			// register FILTER as node (not GET)
-			D_PRINTF("[NODE_REG] Registering FILTER (child=GET) for table_idx=%llu",
-			         (unsigned long long)table_mgr.GetScalarTableIndex(op));
-			table_mgr.AddTableOperator(op);
-			return;
-		} else if (child->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN ||
-		           child->type == LogicalOperatorType::LOGICAL_DELIM_JOIN) {
-			// for IN-clause optimization (MARK join), register FILTER as node
-			// the table_index comes from the join's left child
-			D_PRINTF("[NODE_REG] Registering FILTER (child=JOIN) for table_idx=%llu",
-			         (unsigned long long)table_mgr.GetScalarTableIndex(op));
-			table_mgr.AddTableOperator(op);
-			// still recurse into the join to collect join edges and other tables
-			// ExtractOperatorsRecursive(*child, join_ops);
+			table_mgr.AddTableOperator(child);
 			return;
 		}
 
