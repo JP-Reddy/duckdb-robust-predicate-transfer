@@ -819,8 +819,8 @@ void RPTOptimizerContextState::LinkUseBFToCreateBF(LogicalOperator *plan) {
 		}
 	};
 
-	// pass 1: collect all CREATE_BF operators (indexed by table only, not columns)
-	unordered_map<idx_t, LogicalCreateBF *> create_bf_by_table;
+	// pass 1: collect all CREATE_BF operators (multiple per build table possible)
+	unordered_map<idx_t, vector<LogicalCreateBF *>> create_bf_by_table;
 	vector<LogicalOperator *> queue;
 	queue.push_back(plan);
 
@@ -831,8 +831,7 @@ void RPTOptimizerContextState::LinkUseBFToCreateBF(LogicalOperator *plan) {
 		if (current->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
 			auto *create_bf = dynamic_cast<LogicalCreateBF *>(current);
 			if (create_bf) {
-				idx_t table_idx = create_bf->bf_operation.build_table_idx;
-				create_bf_by_table[table_idx] = create_bf;
+				create_bf_by_table[create_bf->bf_operation.build_table_idx].push_back(create_bf);
 			}
 		}
 
@@ -853,15 +852,25 @@ void RPTOptimizerContextState::LinkUseBFToCreateBF(LogicalOperator *plan) {
 			auto *use_bf = dynamic_cast<LogicalUseBF *>(current);
 			if (use_bf) {
 				idx_t build_table_idx = use_bf->bf_operation.build_table_idx;
+				idx_t probe_table_idx = use_bf->bf_operation.probe_table_idx;
 
 				auto it = create_bf_by_table.find(build_table_idx);
 				if (it != create_bf_by_table.end()) {
-					use_bf->related_create_bf = it->second;
-					it->second->related_use_bf.push_back(use_bf);
+					for (auto *create_bf : it->second) {
+						if (create_bf->bf_operation.probe_table_idx == probe_table_idx) {
+							use_bf->related_create_bf = create_bf;
+							create_bf->related_use_bf.push_back(use_bf);
+							break;
+						}
+					}
+					if (!use_bf->related_create_bf) {
+						D_PRINTF("[LINK] WARNING: No CREATE_BF with matching probe table for USE_BF "
+						         "(build=table_%llu, probe=table_%llu)",
+						         (unsigned long long)build_table_idx, (unsigned long long)probe_table_idx);
+					}
 				} else {
-					D_PRINTF(
-					    "[LINK] WARNING: No matching CREATE_BF found for USE_BF (probe=table_%llu, build=table_%llu)",
-					    (unsigned long long)use_bf->bf_operation.probe_table_idx, (unsigned long long)build_table_idx);
+					D_PRINTF("[LINK] WARNING: No CREATE_BF found for USE_BF (build=table_%llu, probe=table_%llu)",
+					         (unsigned long long)build_table_idx, (unsigned long long)probe_table_idx);
 				}
 			}
 		}
@@ -888,8 +897,15 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 
 		if (current->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
 			auto *create_bf = dynamic_cast<LogicalCreateBF *>(current);
-			if (create_bf && create_bf->is_forward_pass) {
-				forward_creates.push_back(create_bf);
+			if (create_bf) {
+				Printer::Print(StringUtil::Format(
+				    "[PUSHDOWN-SETUP] found CREATE_BF build=table_%llu, is_forward=%d, probe_table=%llu",
+				    (unsigned long long)create_bf->bf_operation.build_table_idx,
+				    (int)create_bf->is_forward_pass,
+				    (unsigned long long)create_bf->bf_operation.probe_table_idx));
+				if (create_bf->is_forward_pass) {
+					forward_creates.push_back(create_bf);
+				}
 			}
 		}
 
@@ -898,16 +914,24 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 		}
 	}
 
+	D_PRINTF("[PUSHDOWN-SETUP] found %zu forward CREATE_BFs", forward_creates.size());
+
 	// for each forward-pass CREATE_BF, set up pushdown targets
 	for (auto *create_bf : forward_creates) {
+		D_PRINTF("[PUSHDOWN-SETUP] CREATE_BF build=table_%llu, related_use_bf=%zu",
+		         (unsigned long long)create_bf->bf_operation.build_table_idx,
+		         create_bf->related_use_bf.size());
 		for (auto *use_bf : create_bf->related_use_bf) {
 			if (!use_bf->bf_operation.is_forward_pass) {
+				D_PRINTF("[PUSHDOWN-SETUP]   skipping USE_BF probe=table_%llu (not forward)",
+				         (unsigned long long)use_bf->bf_operation.probe_table_idx);
 				continue;
 			}
 
 			idx_t probe_table_idx = use_bf->bf_operation.probe_table_idx;
 			auto it = table_mgr.table_lookup.find(probe_table_idx);
 			if (it == table_mgr.table_lookup.end()) {
+				D_PRINTF("[PUSHDOWN-SETUP]   probe table_%llu not in table_lookup", (unsigned long long)probe_table_idx);
 				continue;
 			}
 
