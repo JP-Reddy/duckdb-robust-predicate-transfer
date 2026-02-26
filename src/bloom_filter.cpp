@@ -29,21 +29,6 @@ void PTBloomFilter::Initialize(ClientContext &context_p, uint32_t est_num_rows) 
 	bf_.Initialize(context_p, static_cast<idx_t>(est_num_rows));
 }
 
-int PTBloomFilter::Lookup(DataChunk &chunk, vector<uint32_t> &results, const vector<idx_t> &bound_cols_applied,
-                          uint8_t *bit_vector_buf) const {
-	int count = static_cast<int>(chunk.size());
-	if (count == 0) {
-		return 0;
-	}
-	Vector hashes = HashColumns(chunk, bound_cols_applied);
-	auto hash_data = FlatVector::GetData<hash_t>(hashes);
-
-	for (int i = 0; i < count; i++) {
-		results[i] = bf_.LookupOne(hash_data[i]) ? 1 : 0;
-	}
-	return count;
-}
-
 idx_t PTBloomFilter::LookupSel(DataChunk &chunk, SelectionVector &sel, const vector<idx_t> &bound_cols_applied,
                                 uint8_t *bit_vector_buf) const {
 	idx_t count = chunk.size();

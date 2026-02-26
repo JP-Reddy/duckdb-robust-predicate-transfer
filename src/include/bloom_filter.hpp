@@ -28,8 +28,6 @@ public:
 	bool finalized_ = false;
 
 public:
-	int Lookup(DataChunk &chunk, vector<uint32_t> &results, const vector<idx_t> &bound_cols_applied,
-	           uint8_t *bit_vector_buf = nullptr) const;
 	idx_t LookupSel(DataChunk &chunk, SelectionVector &sel, const vector<idx_t> &bound_cols_applied,
 	                uint8_t *bit_vector_buf) const;
 	void Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built);
