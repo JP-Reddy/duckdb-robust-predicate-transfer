@@ -7,6 +7,7 @@
 #include "table_manager.hpp"
 #include "graph_manager.hpp"
 #include "duckdb/common/unordered_set.hpp"
+#include "duckdb/common/set.hpp"
 #include <algorithm>
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/unordered_map.hpp"
@@ -139,19 +140,17 @@ void RPTOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &plan, 
 
 ColumnBinding RPTOptimizerContextState::ResolveColumnBinding(const ColumnBinding &binding) const {
 	ColumnBinding current = binding;
-	unordered_set<size_t> visited; // to prevent infinite loops
+	set<pair<idx_t, idx_t>> visited;
 
 	// follow the rename chain until we find a base table binding
 	while (true) {
-		// create hash for cycle detection
-		size_t hash = std::hash<idx_t>()(current.table_index) ^ (std::hash<idx_t>()(current.column_index) << 1);
-		if (visited.count(hash)) {
-			// cycle detected, return current binding
+		auto key = make_pair(current.table_index, current.column_index);
+		if (visited.count(key)) {
 			D_PRINTF("WARNING: Cycle detected in rename_col_bindings for binding (%llu.%llu)",
 			         (unsigned long long)current.table_index, (unsigned long long)current.column_index);
 			break;
 		}
-		visited.insert(hash);
+		visited.insert(key);
 
 		// check if this binding exists in the rename map
 		auto it = rename_col_bindings.find(current);
