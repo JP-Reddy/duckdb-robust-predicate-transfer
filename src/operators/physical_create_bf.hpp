@@ -5,6 +5,7 @@
 #include "../optimizer/graph_manager.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include <duckdb/common/types/column/column_data_scan_states.hpp>
+#include "duckdb/planner/table_filter.hpp"
 
 namespace duckdb {
 
@@ -77,9 +78,25 @@ public:
 	// lookup bloom filter by the column it was built on
 	shared_ptr<PTBloomFilter> GetBloomFilter(const ColumnBinding &col) const;
 
+	// dynamic filter pushdown to table scans (forward pass only)
+	struct DynamicFilterTarget {
+		shared_ptr<DynamicTableFilterSet> dynamic_filters;
+		idx_t scan_column_index;
+		ColumnBinding probe_column;
+		LogicalType column_type;
+		string column_name;
+	};
+	vector<DynamicFilterTarget> pushdown_targets;
+	bool is_forward_pass = false;
+
 	// profiling
 	mutable shared_ptr<CreateBFStats> profiling_stats;
 	mutable bool profiling_checked = false;
+};
+
+struct ColumnMinMax {
+	Value min_val, max_val;
+	bool has_value = false;
 };
 
 class CreateBFLocalSinkState : public LocalSinkState {
@@ -88,6 +105,7 @@ public:
 
 	ClientContext &client_context;
 	unique_ptr<ColumnDataCollection> local_data;
+	vector<ColumnMinMax> local_min_max;
 };
 
 class CreateBFGlobalSinkState : public GlobalSinkState {
@@ -109,6 +127,9 @@ public:
 	// store data for sink phase
 	unique_ptr<ColumnDataCollection> total_data;
 	vector<unique_ptr<ColumnDataCollection>> local_data_collections;
+
+	// min-max tracking for dynamic filter pushdown
+	vector<ColumnMinMax> column_min_max;
 };
 
 class CreateBFLocalSourceState : public LocalSourceState {

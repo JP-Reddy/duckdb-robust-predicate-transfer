@@ -27,6 +27,7 @@ public:
 
 	BloomFilterOperation bf_operation;
 	LogicalCreateBF *related_create_bf = nullptr;
+	bool is_passthrough = false;
 
 	PhysicalUseBF *physical = nullptr;
 

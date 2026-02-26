@@ -70,14 +70,6 @@ void LogicalCreateBF::ResolveTypes() {
 	}
 }
 
-// shared_ptr<FilterPlan> BloomFilterOperationToFilterPlan(const BloomFilterOperation &bf_op) {
-// 	auto filter_plan = make_shared<FilterPlan>();
-// 	filter_plan->build = bf_op.build_columns;
-// 	filter_plan->apply = bf_op.probe_columns;
-// 	// filter_plan->return_types will be populated later during ResolveTypes()
-// 	return filter_plan;
-// }
-
 PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPlanGenerator &generator) {
 	if (!physical) {
 		// step 1: get child column bindings to understand chunk schema
@@ -111,6 +103,18 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 		}
 		physical = static_cast<PhysicalCreateBF *>(&physical_op);
 
+		// propagate dynamic filter pushdown targets
+		for (auto &target : pushdown_targets) {
+			PhysicalCreateBF::DynamicFilterTarget phys_target;
+			phys_target.dynamic_filters = target.dynamic_filters;
+			phys_target.scan_column_index = target.scan_column_index;
+			phys_target.probe_column = target.probe_column;
+			phys_target.column_type = target.column_type;
+			phys_target.column_name = target.column_name;
+			physical->pushdown_targets.push_back(std::move(phys_target));
+		}
+		physical->is_forward_pass = is_forward_pass;
+
 		// link back to related USE_BF operators
 		// the links are used to create pipeline dependencies
 		for (const LogicalUseBF *use_bf : related_use_bf) {
@@ -119,20 +123,10 @@ PhysicalOperator &LogicalCreateBF::CreatePlan(ClientContext &context, PhysicalPl
 				// remove related_create_bf.
 				use_bf->physical->related_create_bf = physical;
 				use_bf->physical->related_create_bf_vec.push_back(physical);
-				// string probe_table = "table_" + std::to_string(use_bf->bf_operation.probe_table_idx);
-				// string build_table = "table_" + std::to_string(bf_operation.build_table_idx);
-				// Printer::Print(StringUtil::Format(
-				// 	"[LOGICAL CREATE] linked back to USE_BF (probe=%s) from CREATE_BF (build=%s)",
-				// 	probe_table.c_str(), build_table.c_str()));
 			}
 		}
 		return physical_op;
 	}
 	return *physical;
 }
-
-// void RegisterLogicalCreateBFOperatorExtension(DatabaseInstance &db) {
-// 	auto &config = DBConfig::GetConfig(db);
-// 	config.operator_extensions.push_back(make_uniq<LogicalCreateBF>());
-// }
 } // namespace duckdb

@@ -1,6 +1,6 @@
 #include "rpt_optimizer.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
-// #include "duckdb/planner/operator/logical_get.hpp"
+#include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/common/types.hpp"
@@ -585,6 +585,7 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			create_op.build_columns = child_columns;
 			create_op.probe_columns = parent_columns;
 			create_op.is_create = true;
+			create_op.is_forward_pass = true;
 			create_op.sequence_number = sequence++;
 			forward_bf_ops[child_node->table_op].push_back(create_op);
 
@@ -595,6 +596,7 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			use_op.build_columns = child_columns;
 			use_op.probe_columns = parent_columns;
 			use_op.is_create = false;
+			use_op.is_forward_pass = true;
 			use_op.sequence_number = sequence++;
 			forward_bf_ops[parent_node->table_op].push_back(use_op);
 		}
@@ -716,13 +718,14 @@ RPTOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator> ba
 	unique_ptr<LogicalOperator> current = std::move(base_plan);
 
 	if (reverse_order) {
-		// backward pass
 		for (auto it = merged_ops.rbegin(); it != merged_ops.rend(); ++it) {
 			const auto &bf_op = *it;
 			unique_ptr<LogicalOperator> new_op;
 
 			if (bf_op.is_create) {
-				new_op = make_uniq<LogicalCreateBF>(bf_op);
+				auto create = make_uniq<LogicalCreateBF>(bf_op);
+				create->is_forward_pass = bf_op.is_forward_pass;
+				new_op = std::move(create);
 			} else {
 				new_op = make_uniq<LogicalUseBF>(bf_op);
 			}
@@ -731,12 +734,13 @@ RPTOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator> ba
 			current = std::move(new_op);
 		}
 	} else {
-		// forward pass: normal order
 		for (const auto &bf_op : merged_ops) {
 			unique_ptr<LogicalOperator> new_op;
 
 			if (bf_op.is_create) {
-				new_op = make_uniq<LogicalCreateBF>(bf_op);
+				auto create = make_uniq<LogicalCreateBF>(bf_op);
+				create->is_forward_pass = bf_op.is_forward_pass;
+				new_op = std::move(create);
 			} else {
 				new_op = make_uniq<LogicalUseBF>(bf_op);
 			}
@@ -868,6 +872,105 @@ void RPTOptimizerContextState::LinkUseBFToCreateBF(LogicalOperator *plan) {
 	}
 }
 
+void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan) {
+	if (!plan) {
+		return;
+	}
+
+	// collect all forward-pass LogicalCreateBF operators
+	vector<LogicalCreateBF *> forward_creates;
+	vector<LogicalOperator *> queue;
+	queue.push_back(plan);
+
+	while (!queue.empty()) {
+		LogicalOperator *current = queue.back();
+		queue.pop_back();
+
+		if (current->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
+			auto *create_bf = dynamic_cast<LogicalCreateBF *>(current);
+			if (create_bf && create_bf->is_forward_pass) {
+				forward_creates.push_back(create_bf);
+			}
+		}
+
+		for (auto &child : current->children) {
+			queue.push_back(child.get());
+		}
+	}
+
+	// for each forward-pass CREATE_BF, set up pushdown targets
+	for (auto *create_bf : forward_creates) {
+		for (auto *use_bf : create_bf->related_use_bf) {
+			if (!use_bf->bf_operation.is_forward_pass) {
+				continue;
+			}
+
+			idx_t probe_table_idx = use_bf->bf_operation.probe_table_idx;
+			auto it = table_mgr.table_lookup.find(probe_table_idx);
+			if (it == table_mgr.table_lookup.end()) {
+				continue;
+			}
+
+			LogicalGet *get = TableManager::FindLogicalGet(it->second.table_op);
+			if (!get) {
+				continue;
+			}
+
+			// create or reuse DynamicTableFilterSet on the LogicalGet
+			if (!get->dynamic_filters) {
+				get->dynamic_filters = make_shared_ptr<DynamicTableFilterSet>();
+			}
+
+			// resolve each probe column to a scan column index
+			auto &col_ids = get->GetColumnIds();
+			for (size_t i = 0; i < use_bf->bf_operation.probe_columns.size(); i++) {
+				const auto &probe_col = use_bf->bf_operation.probe_columns[i];
+
+				// find which position in column_ids has this column
+				idx_t scan_col_idx = DConstants::INVALID_INDEX;
+				for (idx_t ci = 0; ci < col_ids.size(); ci++) {
+					if (col_ids[ci].GetPrimaryIndex() == probe_col.column_index) {
+						scan_col_idx = ci;
+						break;
+					}
+				}
+
+				if (scan_col_idx == DConstants::INVALID_INDEX) {
+					D_PRINTF("[PUSHDOWN] probe column (%llu.%llu) not in scan column_ids, skipping",
+					         (unsigned long long)probe_col.table_index, (unsigned long long)probe_col.column_index);
+					continue;
+				}
+
+				// get column type and name
+				LogicalType col_type = LogicalType::BIGINT;
+				string col_name = "col_" + std::to_string(probe_col.column_index);
+				idx_t primary_idx = col_ids[scan_col_idx].GetPrimaryIndex();
+				if (primary_idx < get->returned_types.size()) {
+					col_type = get->returned_types[primary_idx];
+				}
+				if (primary_idx < get->names.size()) {
+					col_name = get->names[primary_idx];
+				}
+
+				LogicalCreateBF::DynamicFilterTarget target;
+				target.dynamic_filters = get->dynamic_filters;
+				target.scan_column_index = scan_col_idx;
+				target.probe_column = probe_col;
+				target.column_type = col_type;
+				target.column_name = col_name;
+				create_bf->pushdown_targets.push_back(std::move(target));
+			}
+
+			// mark USE_BF as passthrough since filters are pushed to scan
+			use_bf->is_passthrough = true;
+
+			D_PRINTF("[PUSHDOWN] forward CREATE_BF (build=table_%llu) -> USE_BF (probe=table_%llu) pushed %zu targets",
+			         (unsigned long long)create_bf->bf_operation.build_table_idx,
+			         (unsigned long long)probe_table_idx, create_bf->pushdown_targets.size());
+		}
+	}
+}
+
 unique_ptr<LogicalOperator> RPTOptimizerContextState::PreOptimize(unique_ptr<LogicalOperator> plan) {
 	// step 1: extract join operators
 	vector<JoinEdge> edges = ExtractOperators(*plan);
@@ -891,14 +994,27 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 
 	// step 3: generate forward/backward pass using MST edges
 	const auto bf_ops = GenerateStageModifications(mst_edges);
-	const unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops = bf_ops.first;
-	const unordered_map<LogicalOperator *, vector<BloomFilterOperation>> backward_bf_ops = bf_ops.second;
+	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops = bf_ops.first;
+	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> backward_bf_ops = bf_ops.second;
+
+	// check pass mode setting
+	Value pass_mode_val;
+	string pass_mode = "both";
+	if (context.TryGetCurrentSetting("rpt_pass_mode", pass_mode_val)) {
+		pass_mode = pass_mode_val.GetValue<string>();
+	}
+	if (pass_mode == "forward_only") {
+		backward_bf_ops.clear();
+	}
 
 	// step 4: insert create_bf/use_bf operators into the plan
 	plan = ApplyStageModifications(std::move(plan), forward_bf_ops, backward_bf_ops);
 
 	// step 5: link USE_BF operators to their corresponding CREATE_BF operators
 	LinkUseBFToCreateBF(plan.get());
+
+	// step 6: set up dynamic filter pushdown for forward-pass operators
+	SetupDynamicFilterPushdown(plan.get());
 
 	// // combine all bloom filter operations for debug (preserving order)
 	// vector<BloomFilterOperation> all_bf_operations;

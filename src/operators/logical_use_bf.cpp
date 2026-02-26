@@ -85,6 +85,7 @@ PhysicalOperator &LogicalUseBF::CreatePlan(ClientContext &context, PhysicalPlanG
 		PhysicalOperator &physical_op = generator.Make<PhysicalUseBF>(
 		    make_shared_ptr<BloomFilterOperation>(bf_operation), plan.types, estimated_cardinality, resolved_indices);
 		physical = static_cast<PhysicalUseBF *>(&physical_op);
+		physical->is_passthrough = is_passthrough;
 
 		// set up reference to related PhysicalCreateBF if available
 		if (related_create_bf) {

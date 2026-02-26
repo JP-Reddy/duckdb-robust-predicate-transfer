@@ -7,6 +7,10 @@
 #include "rpt_profiling.hpp"
 #include <duckdb/parallel/meta_pipeline.hpp>
 #include <duckdb/parallel/thread_context.hpp>
+#include "duckdb/planner/filter/bloom_filter.hpp"
+#include "duckdb/planner/filter/constant_filter.hpp"
+#include "duckdb/planner/filter/selectivity_optional_filter.hpp"
+#include "duckdb/main/config.hpp"
 
 namespace duckdb {
 
@@ -84,6 +88,10 @@ CreateBFGlobalSinkState::CreateBFGlobalSinkState(ClientContext &context, const P
 CreateBFLocalSinkState::CreateBFLocalSinkState(ClientContext &context, const PhysicalCreateBF &op)
     : client_context(context) {
 	local_data = make_uniq<ColumnDataCollection>(client_context, op.types);
+	// initialize min-max tracking for each build column
+	if (op.is_forward_pass) {
+		local_min_max.resize(op.bound_column_indices.size());
+	}
 }
 
 SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
@@ -104,6 +112,68 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
 	} else {
 		local_state.local_data->Append(chunk);
 	}
+
+	// TODO: min-max scanning uses GetValue() per row which is slow; switch to typed pointer access
+	if (is_forward_pass && !local_state.local_min_max.empty() && chunk.size() > 0) {
+		for (idx_t i = 0; i < bound_column_indices.size() && i < local_state.local_min_max.size(); i++) {
+			idx_t col_idx = bound_column_indices[i];
+			if (col_idx >= chunk.ColumnCount()) {
+				continue;
+			}
+			auto &vec = chunk.data[col_idx];
+			auto &type = vec.GetType();
+			if (!type.IsNumeric() && type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::DATE &&
+			    type.id() != LogicalTypeId::TIMESTAMP) {
+				continue;
+			}
+
+			// compute min/max by scanning vector values
+			UnifiedVectorFormat vdata;
+			vec.ToUnifiedFormat(chunk.size(), vdata);
+
+			Value chunk_min, chunk_max;
+			bool has_stats = false;
+			for (idx_t row = 0; row < chunk.size(); row++) {
+				auto idx = vdata.sel->get_index(row);
+				if (!vdata.validity.RowIsValid(idx)) {
+					continue;
+				}
+				Value val = vec.GetValue(row);
+				if (val.IsNull()) {
+					continue;
+				}
+				if (!has_stats) {
+					chunk_min = val;
+					chunk_max = val;
+					has_stats = true;
+				} else {
+					if (val < chunk_min) {
+						chunk_min = val;
+					}
+					if (val > chunk_max) {
+						chunk_max = val;
+					}
+				}
+			}
+
+			if (has_stats) {
+				auto &mm = local_state.local_min_max[i];
+				if (!mm.has_value) {
+					mm.min_val = chunk_min;
+					mm.max_val = chunk_max;
+					mm.has_value = true;
+				} else {
+					if (chunk_min < mm.min_val) {
+						mm.min_val = chunk_min;
+					}
+					if (chunk_max > mm.max_val) {
+						mm.max_val = chunk_max;
+					}
+				}
+			}
+		}
+	}
+
 	return SinkResultType::NEED_MORE_INPUT;
 }
 
@@ -112,6 +182,31 @@ SinkCombineResultType PhysicalCreateBF::Combine(ExecutionContext &context, Opera
 	CreateBFLocalSinkState &local_state = input.local_state.Cast<CreateBFLocalSinkState>();
 	lock_guard<mutex> lock(gstate.glock);
 	gstate.local_data_collections.emplace_back(std::move(local_state.local_data));
+
+	// merge local min-max into global
+	if (!local_state.local_min_max.empty()) {
+		if (gstate.column_min_max.empty()) {
+			gstate.column_min_max.resize(local_state.local_min_max.size());
+		}
+		for (idx_t i = 0; i < local_state.local_min_max.size(); i++) {
+			auto &local_mm = local_state.local_min_max[i];
+			if (!local_mm.has_value) {
+				continue;
+			}
+			auto &global_mm = gstate.column_min_max[i];
+			if (!global_mm.has_value) {
+				global_mm = local_mm;
+			} else {
+				if (local_mm.min_val < global_mm.min_val) {
+					global_mm.min_val = local_mm.min_val;
+				}
+				if (local_mm.max_val > global_mm.max_val) {
+					global_mm.max_val = local_mm.max_val;
+				}
+			}
+		}
+	}
+
 	return SinkCombineResultType::FINISHED;
 }
 
@@ -209,6 +304,72 @@ public:
 				D_PRINTF("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) finalized",
 				         build_table.c_str(), (unsigned long long)col.table_index,
 				         (unsigned long long)col.column_index);
+			}
+		}
+
+		// push dynamic filters to table scans (forward pass only)
+		if (!sink.op.is_forward_pass || sink.op.pushdown_targets.empty()) {
+			return;
+		}
+
+		auto &context = pipeline->GetClientContext();
+		string filter_type = "all";
+		Value filter_type_val;
+		if (context.TryGetCurrentSetting("rpt_filter_type", filter_type_val)) {
+			filter_type = filter_type_val.GetValue<string>();
+		}
+
+		bool push_bf = (filter_type == "all" || filter_type == "bf_only");
+		bool push_minmax = (filter_type == "all" || filter_type == "minmax_only");
+
+		for (auto &target : sink.op.pushdown_targets) {
+			// find which build column maps to this probe column
+			for (size_t i = 0; i < sink.op.bf_operation->build_columns.size(); i++) {
+				// match probe column index to find corresponding build column
+				if (i >= sink.op.bf_operation->probe_columns.size()) {
+					break;
+				}
+				const auto &probe_col = sink.op.bf_operation->probe_columns[i];
+				if (probe_col.table_index != target.probe_column.table_index ||
+				    probe_col.column_index != target.probe_column.column_index) {
+					continue;
+				}
+
+				const auto &build_col = sink.op.bf_operation->build_columns[i];
+
+				// push bloom filter
+				if (push_bf) {
+					auto bf_it = sink.op.bloom_filter_map.find(build_col);
+					if (bf_it != sink.op.bloom_filter_map.end() && bf_it->second && !bf_it->second->IsEmpty()) {
+						auto bf_filter = make_uniq<BFTableFilter>(bf_it->second->GetNativeFilter(), false,
+						                                          target.column_name, target.column_type);
+						auto wrapped = make_uniq<SelectivityOptionalFilter>(
+						    std::move(bf_filter), SelectivityOptionalFilter::BF_THRESHOLD,
+						    SelectivityOptionalFilter::BF_CHECK_N);
+						target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(wrapped));
+						D_PRINTF("[PUSHDOWN] pushed BF for col %s to scan col %llu", target.column_name.c_str(),
+						         (unsigned long long)target.scan_column_index);
+					}
+				}
+
+				// push min-max filters directly (cheap enough to skip adaptive wrapper)
+				if (push_minmax && i < sink.column_min_max.size() && sink.column_min_max[i].has_value) {
+					auto &mm = sink.column_min_max[i];
+					// >= min
+					auto min_filter =
+					    make_uniq<ConstantFilter>(ExpressionType::COMPARE_GREATERTHANOREQUALTO, mm.min_val);
+					target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(min_filter));
+
+					// <= max
+					auto max_filter =
+					    make_uniq<ConstantFilter>(ExpressionType::COMPARE_LESSTHANOREQUALTO, mm.max_val);
+					target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(max_filter));
+
+					D_PRINTF("[PUSHDOWN] pushed min-max for col %s [%s, %s]", target.column_name.c_str(),
+					         mm.min_val.ToString().c_str(), mm.max_val.ToString().c_str());
+				}
+
+				break; // found the matching build column
 			}
 		}
 	}
@@ -358,7 +519,7 @@ unique_ptr<LocalSourceState> PhysicalCreateBF::GetLocalSourceState(ExecutionCont
 	return make_uniq<CreateBFLocalSourceState>();
 }
 
-// TODO: fetch the chunks parallely
+
 SourceResultType PhysicalCreateBF::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
                                                    OperatorSourceInput &input) const {
 	auto &gstate = sink_state->Cast<CreateBFGlobalSinkState>();

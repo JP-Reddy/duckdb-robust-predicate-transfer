@@ -81,6 +81,9 @@ public:
 	// helper to link USE_BF operators to their corresponding CREATE_BF operators
 	void LinkUseBFToCreateBF(LogicalOperator *plan);
 
+	// set up dynamic filter pushdown for forward-pass CREATE_BF operators
+	void SetupDynamicFilterPushdown(LogicalOperator *plan);
+
 	// resolve column binding through rename chain to get base table binding
 	ColumnBinding ResolveColumnBinding(const ColumnBinding &binding) const;
 

@@ -21,7 +21,9 @@ string PhysicalUseBF::GetName() const {
 
 string PhysicalUseBF::ToString(ExplainFormat format) const {
 	string result = "USE_BF";
-	if (bf_operation) {
+	if (is_passthrough) {
+		result += " (passthrough, pushed to scan)";
+	} else if (bf_operation) {
 		result += " [" + std::to_string(bf_operation->probe_columns.size()) + " probe columns]";
 	}
 	return result;
@@ -29,7 +31,7 @@ string PhysicalUseBF::ToString(ExplainFormat format) const {
 
 InsertionOrderPreservingMap<string> PhysicalUseBF::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
-	result["Operator"] = "PhysicalUseBF";
+	result["Operator"] = is_passthrough ? "PhysicalUseBF (passthrough)" : "PhysicalUseBF";
 
 	result["Build Table"] = to_string(bf_operation->build_table_idx);
 	result["Probe Table"] = to_string(bf_operation->probe_table_idx);
@@ -57,6 +59,12 @@ unique_ptr<OperatorState> PhysicalUseBF::GetOperatorState(ExecutionContext &cont
 
 OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
                                                   GlobalOperatorState &gstate, OperatorState &state_p) const {
+	// passthrough mode: filters pushed to scan, just forward data
+	if (is_passthrough) {
+		chunk.Reference(input);
+		return OperatorResultType::NEED_MORE_INPUT;
+	}
+
 	if (!profiling_checked) {
 		profiling_checked = true;
 		auto prof = GetRPTProfilingState(context.client);

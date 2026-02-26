@@ -9,6 +9,7 @@
 
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/operator/logical_extension_operator.hpp"
+#include "duckdb/planner/table_filter.hpp"
 #include "../optimizer/graph_manager.hpp"
 
 namespace duckdb {
@@ -30,8 +31,17 @@ public:
 	PhysicalCreateBF *physical = nullptr;
 
 	vector<LogicalUseBF *> related_use_bf;
-	vector<shared_ptr<DynamicTableFilterSet>> min_max_to_create;
-	vector<vector<ColumnBinding>> min_max_applied_cols;
+	bool is_forward_pass = false;
+
+	struct DynamicFilterTarget {
+		shared_ptr<DynamicTableFilterSet> dynamic_filters;
+		idx_t scan_column_index;
+		ColumnBinding probe_column;
+		LogicalType column_type;
+		string column_name;
+	};
+	vector<DynamicFilterTarget> pushdown_targets;
+
 	string message;
 
 public:

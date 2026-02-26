@@ -38,6 +38,10 @@ public:
 		return !bf_.IsInitialized();
 	}
 
+	BloomFilter &GetNativeFilter() {
+		return bf_;
+	}
+
 private:
 	BloomFilter bf_;
 };

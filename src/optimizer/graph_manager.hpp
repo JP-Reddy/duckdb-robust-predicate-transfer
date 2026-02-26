@@ -53,6 +53,7 @@ public:
 	vector<ColumnBinding> probe_columns;
 	JoinType join_type;
 	idx_t sequence_number; // for preserving generation order
+	bool is_forward_pass = false;
 };
 
 } // namespace duckdb

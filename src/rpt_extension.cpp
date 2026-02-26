@@ -58,6 +58,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          Value::BOOLEAN(false));
 	config.AddExtensionOption("rpt_display_dag", "Display RPT transfer DAG", LogicalType::BOOLEAN,
 	                          Value::BOOLEAN(false));
+	config.AddExtensionOption("rpt_filter_type", "Filter type for scan pushdown: all, bf_only, minmax_only",
+	                          LogicalType::VARCHAR, Value("all"));
+	config.AddExtensionOption("rpt_pass_mode", "Pass mode: both, forward_only", LogicalType::VARCHAR, Value("both"));
 }
 
 void RptExtension::Load(ExtensionLoader &loader) {

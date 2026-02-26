@@ -57,6 +57,7 @@ protected:
 
 public:
 	shared_ptr<BloomFilterOperation> bf_operation;
+	bool is_passthrough = false;
 
 	// maps the column indices to resolved chunk column positions
 	vector<idx_t> bound_column_indices;
