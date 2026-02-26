@@ -926,18 +926,11 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 			for (size_t i = 0; i < use_bf->bf_operation.probe_columns.size(); i++) {
 				const auto &probe_col = use_bf->bf_operation.probe_columns[i];
 
-				// find which position in column_ids has this column
-				idx_t scan_col_idx = DConstants::INVALID_INDEX;
-				for (idx_t ci = 0; ci < col_ids.size(); ci++) {
-					if (col_ids[ci].GetPrimaryIndex() == probe_col.column_index) {
-						scan_col_idx = ci;
-						break;
-					}
-				}
-
-				if (scan_col_idx == DConstants::INVALID_INDEX) {
-					D_PRINTF("[PUSHDOWN] probe column (%llu.%llu) not in scan column_ids, skipping",
-					         (unsigned long long)probe_col.table_index, (unsigned long long)probe_col.column_index);
+				idx_t scan_col_idx = probe_col.column_index;
+				if (scan_col_idx >= col_ids.size()) {
+					D_PRINTF("[PUSHDOWN] probe column (%llu.%llu) out of bounds for scan column_ids (size=%zu)",
+					         (unsigned long long)probe_col.table_index, (unsigned long long)probe_col.column_index,
+					         col_ids.size());
 					continue;
 				}
 
