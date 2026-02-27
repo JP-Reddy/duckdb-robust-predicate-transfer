@@ -843,9 +843,14 @@ void RPTOptimizerContextState::LinkUseBFToCreateBF(LogicalOperator *plan) {
 				auto it = create_bf_by_table.find(build_table_idx);
 				if (it != create_bf_by_table.end()) {
 					for (auto *create_bf : it->second) {
-						if (create_bf->bf_operation.probe_table_idx == probe_table_idx) {
-							use_bf->related_create_bf = create_bf;
-							create_bf->related_use_bf.push_back(use_bf);
+						for (const auto &pc : create_bf->bf_operation.probe_columns) {
+							if (pc.table_index == probe_table_idx) {
+								use_bf->related_create_bf = create_bf;
+								create_bf->related_use_bf.push_back(use_bf);
+								break;
+							}
+						}
+						if (use_bf->related_create_bf) {
 							break;
 						}
 					}
