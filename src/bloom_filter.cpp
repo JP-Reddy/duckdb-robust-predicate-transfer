@@ -30,7 +30,7 @@ void PTBloomFilter::Initialize(ClientContext &context_p, uint32_t est_num_rows) 
 }
 
 idx_t PTBloomFilter::LookupSel(DataChunk &chunk, SelectionVector &sel, const vector<idx_t> &bound_cols_applied,
-                                uint8_t *bit_vector_buf) const {
+                               uint8_t *bit_vector_buf) const {
 	idx_t count = chunk.size();
 	if (count == 0) {
 		return 0;

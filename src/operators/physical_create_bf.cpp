@@ -277,8 +277,8 @@ public:
 			for (idx_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
 				idx_t chunk_idx_from = chunk_idx;
 				idx_t chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_thread, chunk_count);
-				finalize_tasks.push_back(make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink,
-				                                                        chunk_idx_from, chunk_idx_to));
+				finalize_tasks.push_back(
+				    make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink, chunk_idx_from, chunk_idx_to));
 				chunk_idx = chunk_idx_to;
 				if (chunk_idx == chunk_count) {
 					break;
@@ -343,9 +343,9 @@ public:
 					if (bf_it != sink.op.bloom_filter_map.end() && bf_it->second && !bf_it->second->IsEmpty()) {
 						auto bf_filter = make_uniq<BFTableFilter>(bf_it->second->GetNativeFilter(), false,
 						                                          target.column_name, target.column_type);
-						auto wrapped = make_uniq<SelectivityOptionalFilter>(
-						    std::move(bf_filter), SelectivityOptionalFilter::BF_THRESHOLD,
-						    SelectivityOptionalFilter::BF_CHECK_N);
+						auto wrapped = make_uniq<SelectivityOptionalFilter>(std::move(bf_filter),
+						                                                    SelectivityOptionalFilter::BF_THRESHOLD,
+						                                                    SelectivityOptionalFilter::BF_CHECK_N);
 						target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(wrapped));
 						D_PRINTF("[PUSHDOWN] pushed BF for col %s to scan col %llu", target.column_name.c_str(),
 						         (unsigned long long)target.scan_column_index);
@@ -361,8 +361,7 @@ public:
 					target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(min_filter));
 
 					// <= max
-					auto max_filter =
-					    make_uniq<ConstantFilter>(ExpressionType::COMPARE_LESSTHANOREQUALTO, mm.max_val);
+					auto max_filter = make_uniq<ConstantFilter>(ExpressionType::COMPARE_LESSTHANOREQUALTO, mm.max_val);
 					target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(max_filter));
 
 					D_PRINTF("[PUSHDOWN] pushed min-max for col %s [%s, %s]", target.column_name.c_str(),
@@ -518,7 +517,6 @@ unique_ptr<LocalSourceState> PhysicalCreateBF::GetLocalSourceState(ExecutionCont
                                                                    GlobalSourceState &gstate) const {
 	return make_uniq<CreateBFLocalSourceState>();
 }
-
 
 SourceResultType PhysicalCreateBF::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
                                                    OperatorSourceInput &input) const {

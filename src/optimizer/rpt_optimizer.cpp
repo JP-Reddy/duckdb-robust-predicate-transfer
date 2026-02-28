@@ -889,11 +889,6 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 		if (current->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
 			auto *create_bf = dynamic_cast<LogicalCreateBF *>(current);
 			if (create_bf) {
-				Printer::Print(StringUtil::Format(
-				    "[PUSHDOWN-SETUP] found CREATE_BF build=table_%llu, is_forward=%d, probe_table=%llu",
-				    (unsigned long long)create_bf->bf_operation.build_table_idx,
-				    (int)create_bf->is_forward_pass,
-				    (unsigned long long)create_bf->bf_operation.probe_table_idx));
 				if (create_bf->is_forward_pass) {
 					forward_creates.push_back(create_bf);
 				}
@@ -910,8 +905,7 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 	// for each forward-pass CREATE_BF, set up pushdown targets
 	for (auto *create_bf : forward_creates) {
 		D_PRINTF("[PUSHDOWN-SETUP] CREATE_BF build=table_%llu, related_use_bf=%zu",
-		         (unsigned long long)create_bf->bf_operation.build_table_idx,
-		         create_bf->related_use_bf.size());
+		         (unsigned long long)create_bf->bf_operation.build_table_idx, create_bf->related_use_bf.size());
 		for (auto *use_bf : create_bf->related_use_bf) {
 			if (!use_bf->bf_operation.is_forward_pass) {
 				D_PRINTF("[PUSHDOWN-SETUP]   skipping USE_BF probe=table_%llu (not forward)",
@@ -922,7 +916,8 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 			idx_t probe_table_idx = use_bf->bf_operation.probe_table_idx;
 			auto it = table_mgr.table_lookup.find(probe_table_idx);
 			if (it == table_mgr.table_lookup.end()) {
-				D_PRINTF("[PUSHDOWN-SETUP]   probe table_%llu not in table_lookup", (unsigned long long)probe_table_idx);
+				D_PRINTF("[PUSHDOWN-SETUP]   probe table_%llu not in table_lookup",
+				         (unsigned long long)probe_table_idx);
 				continue;
 			}
 
@@ -973,8 +968,8 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 			use_bf->is_passthrough = true;
 
 			D_PRINTF("[PUSHDOWN] forward CREATE_BF (build=table_%llu) -> USE_BF (probe=table_%llu) pushed %zu targets",
-			         (unsigned long long)create_bf->bf_operation.build_table_idx,
-			         (unsigned long long)probe_table_idx, create_bf->pushdown_targets.size());
+			         (unsigned long long)create_bf->bf_operation.build_table_idx, (unsigned long long)probe_table_idx,
+			         create_bf->pushdown_targets.size());
 		}
 	}
 }
