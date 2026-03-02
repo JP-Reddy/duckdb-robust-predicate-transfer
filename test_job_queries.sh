@@ -9,6 +9,8 @@
 #   --timing              Show timing information
 #   --runs N              Run each query N times and take the minimum (default: 1)
 #   --limit N             Only run the first N queries (default: all)
+#   --no-jfp <target>     Disable DuckDB's join_filter_pushdown optimizer
+#                         target: rpt, baseline, or both
 
 set -e
 
@@ -28,6 +30,7 @@ VERBOSE=false
 TIMING=false
 RUNS=1
 LIMIT=0
+NO_JFP=""  # "", "rpt", "baseline", or "both"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -58,6 +61,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --limit)
             LIMIT="$2"
+            shift 2
+            ;;
+        --no-jfp)
+            NO_JFP="$2"
+            if [[ "$NO_JFP" != "rpt" && "$NO_JFP" != "baseline" && "$NO_JFP" != "both" ]]; then
+                echo "Error: --no-jfp must be 'rpt', 'baseline', or 'both'"
+                exit 1
+            fi
             shift 2
             ;;
         *)
@@ -99,18 +110,27 @@ check_prerequisites() {
     fi
 }
 
+# Build the disable-JFP prefix for a given mode ("true" = rpt, "false" = baseline)
+jfp_prefix() {
+    local with_extension="$1"
+    if [[ "$NO_JFP" = "both" ]] || \
+       [[ "$NO_JFP" = "rpt" && "$with_extension" = "true" ]] || \
+       [[ "$NO_JFP" = "baseline" && "$with_extension" = "false" ]]; then
+        echo "SET disabled_optimizers = 'join_filter_pushdown';"
+    fi
+}
+
 # Run a query and capture output
 run_query() {
     local query="$1"
     local with_extension="$2"
     local output_file="$3"
-    
+    local jfp=$(jfp_prefix "$with_extension")
+
     if [ "$with_extension" = "true" ]; then
-        # Run with extension, filter debug output
-        "$DUCKDB" "$DB" -unsigned -noheader -list -c "LOAD '$EXT'; $query" 2>/dev/null > "$output_file" || true
+        "$DUCKDB" "$DB" -unsigned -noheader -list -c "LOAD '$EXT'; $jfp $query" 2>/dev/null > "$output_file" || true
     else
-        # Run without extension (baseline)
-        "$DUCKDB" "$DB" -unsigned -noheader -list -c "$query" 2>/dev/null > "$output_file" || true
+        "$DUCKDB" "$DB" -unsigned -noheader -list -c "$jfp $query" 2>/dev/null > "$output_file" || true
     fi
 }
 
@@ -124,15 +144,19 @@ run_query_timed() {
     local prof_file="$prof_dir/profile.json"
     local min_time=""
 
+    local jfp=$(jfp_prefix "$with_extension")
+
     for ((r=1; r<=RUNS; r++)); do
         if [ "$with_extension" = "true" ]; then
             "$DUCKDB" "$DB" -unsigned -noheader -list -c "
 LOAD '$EXT';
+$jfp
 PRAGMA enable_profiling='json';
 PRAGMA profiling_output='$prof_file';
 $query" 2>/dev/null > "$output_file" || true
         else
             "$DUCKDB" "$DB" -unsigned -noheader -list -c "
+$jfp
 PRAGMA enable_profiling='json';
 PRAGMA profiling_output='$prof_file';
 $query" 2>/dev/null > "$output_file" || true
