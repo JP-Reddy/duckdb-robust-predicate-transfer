@@ -111,18 +111,9 @@ public:
 class CreateBFGlobalSinkState : public GlobalSinkState {
 public:
 	CreateBFGlobalSinkState(ClientContext &context, const PhysicalCreateBF &op);
-	void ScheduleFinalize(Pipeline &pipeline, Event &event);
 
 	const PhysicalCreateBF &op;
 	mutex glock;
-	mutex bf_lock;
-
-	// bloom filter insert info for finalize tasks
-	struct BFInsertInfo {
-		shared_ptr<PTBloomFilter> bf;
-		vector<idx_t> bound_cols;
-	};
-	unordered_map<ColumnBinding, BFInsertInfo, ColumnBindingHash, ColumnBindingEqual> bf_insert_info;
 
 	// store data for sink phase
 	unique_ptr<ColumnDataCollection> total_data;

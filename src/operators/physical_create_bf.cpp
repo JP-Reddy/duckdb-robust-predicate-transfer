@@ -2,11 +2,9 @@
 #include "bloom_filter.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parallel/pipeline.hpp"
-#include "duckdb/parallel/base_pipeline_event.hpp"
 #include "debug_utils.hpp"
 #include "rpt_profiling.hpp"
 #include <duckdb/parallel/meta_pipeline.hpp>
-#include <duckdb/parallel/thread_context.hpp>
 #include "duckdb/planner/filter/bloom_filter.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/planner/filter/selectivity_optional_filter.hpp"
@@ -83,6 +81,12 @@ InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
 
 CreateBFGlobalSinkState::CreateBFGlobalSinkState(ClientContext &context, const PhysicalCreateBF &op) : op(op) {
 	total_data = make_uniq<ColumnDataCollection>(context, op.types);
+	// initialize bloom filters upfront so Sink can insert directly
+	for (auto &entry : op.bloom_filter_map) {
+		if (entry.second) {
+			entry.second->Initialize(context, op.estimated_cardinality);
+		}
+	}
 }
 
 CreateBFLocalSinkState::CreateBFLocalSinkState(ClientContext &context, const PhysicalCreateBF &op)
@@ -111,6 +115,15 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
 		local_state.local_data->Append(chunk);
 	} else {
 		local_state.local_data->Append(chunk);
+	}
+
+	// insert into bloom filters
+	for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
+		const auto &col = bf_operation->build_columns[i];
+		auto it = bloom_filter_map.find(col);
+		if (it != bloom_filter_map.end() && it->second) {
+			it->second->Insert(chunk, {bound_column_indices[i]});
+		}
 	}
 
 	// TODO: min-max scanning uses GetValue() per row which is slow; switch to typed pointer access
@@ -214,171 +227,65 @@ SinkCombineResultType PhysicalCreateBF::Combine(ExecutionContext &context, Opera
 // Finalize
 //===--------------------------------------------------------------------===//
 
-class CreateBFFinalizeTask : public ExecutorTask {
-public:
-	CreateBFFinalizeTask(shared_ptr<Event> event_p, ClientContext &context, CreateBFGlobalSinkState &sink_p,
-	                     idx_t chunk_idx_from_p, idx_t chunk_idx_to_p)
-	    : ExecutorTask(context, event_p, sink_p.op), event(std::move(event_p)), sink(sink_p),
-	      chunk_idx_from(chunk_idx_from_p), chunk_idx_to(chunk_idx_to_p) {
+// pushes dynamic filters (BF + min-max) to table scans after BF is fully built
+static void PushDynamicFilters(const PhysicalCreateBF &op, const CreateBFGlobalSinkState &gsink,
+                               ClientContext &context) {
+	if (!op.is_forward_pass || op.pushdown_targets.empty()) {
+		return;
 	}
 
-	TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
-		ThreadContext tcontext(this->executor.context);
-		tcontext.profiler.StartOperator(&sink.op);
+	string filter_type = "all";
+	Value filter_type_val;
+	if (context.TryGetCurrentSetting("rpt_filter_type", filter_type_val)) {
+		filter_type = filter_type_val.GetValue<string>();
+	}
 
-		for (idx_t i = chunk_idx_from; i < chunk_idx_to; i++) {
-			DataChunk chunk;
-			sink.total_data->InitializeScanChunk(chunk);
-			sink.total_data->FetchChunk(i, chunk);
-			// insert into each bloom filter
-			for (auto &entry : sink.bf_insert_info) {
-				entry.second.bf->Insert(chunk, entry.second.bound_cols);
+	bool push_bf = (filter_type == "all" || filter_type == "bf_only");
+	bool push_minmax = (filter_type == "all" || filter_type == "minmax_only");
+
+	for (auto &target : op.pushdown_targets) {
+		for (size_t i = 0; i < op.bf_operation->build_columns.size(); i++) {
+			if (i >= op.bf_operation->probe_columns.size()) {
+				break;
 			}
-		}
+			const auto &probe_col = op.bf_operation->probe_columns[i];
+			if (probe_col.table_index != target.probe_column.table_index ||
+			    probe_col.column_index != target.probe_column.column_index) {
+				continue;
+			}
 
-		event->FinishTask();
-		tcontext.profiler.EndOperator(nullptr);
-		this->executor.Flush(tcontext);
-		return TaskExecutionResult::TASK_FINISHED;
-	}
+			const auto &build_col = op.bf_operation->build_columns[i];
 
-private:
-	shared_ptr<Event> event;
-	CreateBFGlobalSinkState &sink;
-	idx_t chunk_idx_from;
-	idx_t chunk_idx_to;
-};
-
-class CreateBFFinalizeEvent : public BasePipelineEvent {
-public:
-	CreateBFFinalizeEvent(Pipeline &pipeline_p, CreateBFGlobalSinkState &sink)
-	    : BasePipelineEvent(pipeline_p), sink(sink) {
-	}
-
-	CreateBFGlobalSinkState &sink;
-
-public:
-	void Schedule() override {
-		auto &context = pipeline->GetClientContext();
-
-		vector<shared_ptr<Task>> finalize_tasks;
-		unique_ptr<ColumnDataCollection> &buffer = sink.total_data;
-		const auto chunk_count = buffer->ChunkCount();
-
-		const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
-		if (num_threads == 1 ||
-		    (buffer->Count() < PARALLEL_CONSTRUCT_THRESHOLD && !context.config.verify_parallelism)) {
-			finalize_tasks.push_back(
-			    make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink, 0, chunk_count));
-		} else {
-			auto chunks_per_thread = (chunk_count + num_threads - 1) / num_threads;
-
-			idx_t chunk_idx = 0;
-			for (idx_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
-				idx_t chunk_idx_from = chunk_idx;
-				idx_t chunk_idx_to = MinValue<idx_t>(chunk_idx + chunks_per_thread, chunk_count);
-				finalize_tasks.push_back(
-				    make_uniq<CreateBFFinalizeTask>(shared_from_this(), context, sink, chunk_idx_from, chunk_idx_to));
-				chunk_idx = chunk_idx_to;
-				if (chunk_idx == chunk_count) {
-					break;
+			if (push_bf) {
+				auto bf_it = op.bloom_filter_map.find(build_col);
+				if (bf_it != op.bloom_filter_map.end() && bf_it->second && !bf_it->second->IsEmpty()) {
+					auto bf_filter = make_uniq<BFTableFilter>(bf_it->second->GetNativeFilter(), false,
+					                                          target.column_name, target.column_type);
+					auto wrapped = make_uniq<SelectivityOptionalFilter>(std::move(bf_filter),
+					                                                    SelectivityOptionalFilter::BF_THRESHOLD,
+					                                                    SelectivityOptionalFilter::BF_CHECK_N);
+					target.dynamic_filters->PushFilter(op, target.scan_column_index, std::move(wrapped));
+					D_PRINTF("[PUSHDOWN] pushed BF for col %s to scan col %llu", target.column_name.c_str(),
+					         (unsigned long long)target.scan_column_index);
 				}
 			}
-		}
 
-		SetTasks(std::move(finalize_tasks));
-	}
+			if (push_minmax && i < gsink.column_min_max.size() && gsink.column_min_max[i].has_value) {
+				auto &mm = gsink.column_min_max[i];
+				auto min_filter =
+				    make_uniq<ConstantFilter>(ExpressionType::COMPARE_GREATERTHANOREQUALTO, mm.min_val);
+				target.dynamic_filters->PushFilter(op, target.scan_column_index, std::move(min_filter));
 
-	void FinishEvent() override {
-		// mark all bloom filters as finalized after building completes
-		string build_table =
-		    sink.op.bf_operation ? "table_" + std::to_string(sink.op.bf_operation->build_table_idx) : "unknown";
-		D_PRINTF("[FINALIZE] CREATE_BF (build=%s): %zu bloom filters", build_table.c_str(),
-		         sink.op.bloom_filter_map.size());
+				auto max_filter = make_uniq<ConstantFilter>(ExpressionType::COMPARE_LESSTHANOREQUALTO, mm.max_val);
+				target.dynamic_filters->PushFilter(op, target.scan_column_index, std::move(max_filter));
 
-		for (auto &entry : sink.op.bloom_filter_map) {
-			const ColumnBinding &col = entry.first;
-			const shared_ptr<PTBloomFilter> &bf = entry.second;
-			if (bf) {
-				bf->finalized_ = true;
-				D_PRINTF("[FINALIZE] CREATE_BF (build=%s): Bloom filter for column (%llu.%llu) finalized",
-				         build_table.c_str(), (unsigned long long)col.table_index,
-				         (unsigned long long)col.column_index);
+				D_PRINTF("[PUSHDOWN] pushed min-max for col %s [%s, %s]", target.column_name.c_str(),
+				         mm.min_val.ToString().c_str(), mm.max_val.ToString().c_str());
 			}
-		}
 
-		// push dynamic filters to table scans (forward pass only)
-		if (!sink.op.is_forward_pass || sink.op.pushdown_targets.empty()) {
-			return;
-		}
-
-		auto &context = pipeline->GetClientContext();
-		string filter_type = "all";
-		Value filter_type_val;
-		if (context.TryGetCurrentSetting("rpt_filter_type", filter_type_val)) {
-			filter_type = filter_type_val.GetValue<string>();
-		}
-
-		bool push_bf = (filter_type == "all" || filter_type == "bf_only");
-		bool push_minmax = (filter_type == "all" || filter_type == "minmax_only");
-
-		for (auto &target : sink.op.pushdown_targets) {
-			// find which build column maps to this probe column
-			for (size_t i = 0; i < sink.op.bf_operation->build_columns.size(); i++) {
-				// match probe column index to find corresponding build column
-				if (i >= sink.op.bf_operation->probe_columns.size()) {
-					break;
-				}
-				const auto &probe_col = sink.op.bf_operation->probe_columns[i];
-				if (probe_col.table_index != target.probe_column.table_index ||
-				    probe_col.column_index != target.probe_column.column_index) {
-					continue;
-				}
-
-				const auto &build_col = sink.op.bf_operation->build_columns[i];
-
-				// push bloom filter
-				if (push_bf) {
-					auto bf_it = sink.op.bloom_filter_map.find(build_col);
-					if (bf_it != sink.op.bloom_filter_map.end() && bf_it->second && !bf_it->second->IsEmpty()) {
-						auto bf_filter = make_uniq<BFTableFilter>(bf_it->second->GetNativeFilter(), false,
-						                                          target.column_name, target.column_type);
-						auto wrapped = make_uniq<SelectivityOptionalFilter>(std::move(bf_filter),
-						                                                    SelectivityOptionalFilter::BF_THRESHOLD,
-						                                                    SelectivityOptionalFilter::BF_CHECK_N);
-						target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(wrapped));
-						D_PRINTF("[PUSHDOWN] pushed BF for col %s to scan col %llu", target.column_name.c_str(),
-						         (unsigned long long)target.scan_column_index);
-					}
-				}
-
-				// push min-max filters directly (cheap enough to skip adaptive wrapper)
-				if (push_minmax && i < sink.column_min_max.size() && sink.column_min_max[i].has_value) {
-					auto &mm = sink.column_min_max[i];
-					// >= min
-					auto min_filter =
-					    make_uniq<ConstantFilter>(ExpressionType::COMPARE_GREATERTHANOREQUALTO, mm.min_val);
-					target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(min_filter));
-
-					// <= max
-					auto max_filter = make_uniq<ConstantFilter>(ExpressionType::COMPARE_LESSTHANOREQUALTO, mm.max_val);
-					target.dynamic_filters->PushFilter(sink.op, target.scan_column_index, std::move(max_filter));
-
-					D_PRINTF("[PUSHDOWN] pushed min-max for col %s [%s, %s]", target.column_name.c_str(),
-					         mm.min_val.ToString().c_str(), mm.max_val.ToString().c_str());
-				}
-
-				break; // found the matching build column
-			}
+			break;
 		}
 	}
-
-	static constexpr const idx_t PARALLEL_CONSTRUCT_THRESHOLD = 100000;
-};
-
-void CreateBFGlobalSinkState::ScheduleFinalize(Pipeline &pipeline, Event &event) {
-	auto new_event = make_shared_ptr<CreateBFFinalizeEvent>(pipeline, *this);
-	event.InsertEvent(std::move(new_event));
 }
 
 SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
@@ -393,54 +300,33 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 		}
 	}
 
-	ThreadContext tcontext(context);
-	tcontext.profiler.StartOperator(this);
 	auto &gsink = input.global_state.Cast<CreateBFGlobalSinkState>();
-	const idx_t num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
 
-	// time the finalize phase (merge + BF init + schedule)
+	// time the finalize phase
 	unique_ptr<ScopedTimer> fin_timer;
 	if (profiling_stats) {
 		fin_timer = make_uniq<ScopedTimer>(profiling_stats->finalize_time_us);
 	}
 
-	// 1. merge local data collections
+	// 1. merge local data collections - needed for downstream Source
 	for (auto &local_data : gsink.local_data_collections) {
 		gsink.total_data->Combine(*local_data);
 	}
-
-	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
-	D_PRINTF("[FINALIZE] CREATE_BF (build=%s): total_data contains %llu rows", build_table.c_str(),
-	         (unsigned long long)gsink.total_data->Count());
-
 	gsink.local_data_collections.clear();
 
-	// 2. initialize bloom filters and prepare insert info for finalize tasks
-	lock_guard<mutex> lock(gsink.bf_lock);
+	string build_table = bf_operation ? "table_" + std::to_string(bf_operation->build_table_idx) : "unknown";
+	D_PRINTF("[FINALIZE] CREATE_BF (build=%s): total_data contains %llu rows, %zu bloom filters", build_table.c_str(),
+	         (unsigned long long)gsink.total_data->Count(), bloom_filter_map.size());
+
+	// 2. mark bloom filters as finalized
 	for (auto &entry : bloom_filter_map) {
-		const shared_ptr<PTBloomFilter> &bf = entry.second;
-		if (bf) {
-			bf->Initialize(context, estimated_cardinality);
-			bf->finalized_ = false;
+		if (entry.second) {
+			entry.second->finalized_ = true;
 		}
 	}
 
-	for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
-		const auto &col = bf_operation->build_columns[i];
-		auto it = bloom_filter_map.find(col);
-		if (it != bloom_filter_map.end()) {
-			CreateBFGlobalSinkState::BFInsertInfo info;
-			info.bf = it->second;
-			info.bound_cols = {bound_column_indices[i]};
-			gsink.bf_insert_info[col] = std::move(info);
-		}
-	}
-
-	// 3. schedule parallel finalization
-	gsink.ScheduleFinalize(pipeline, event);
-
-	tcontext.profiler.EndOperator(nullptr);
-	context.GetExecutor().Flush(tcontext);
+	// 3. push dynamic filters to table scans
+	PushDynamicFilters(*this, gsink, context);
 
 	return SinkFinalizeType::READY;
 }
