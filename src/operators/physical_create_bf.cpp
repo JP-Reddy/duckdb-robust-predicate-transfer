@@ -76,6 +76,106 @@ InsertionOrderPreservingMap<string> PhysicalCreateBF::ParamsToString() const {
 }
 
 //===--------------------------------------------------------------------===//
+// Min-Max helpers
+//===--------------------------------------------------------------------===//
+
+template <typename T>
+static void TypedUpdateMinMax(Vector &vec, idx_t count, ColumnMinMax &mm) {
+	UnifiedVectorFormat vdata;
+	vec.ToUnifiedFormat(count, vdata);
+	auto *data = UnifiedVectorFormat::GetData<T>(vdata);
+
+	T local_min {}, local_max {};
+	bool has_val = false;
+
+	for (idx_t row = 0; row < count; row++) {
+		auto idx = vdata.sel->get_index(row);
+		if (!vdata.validity.RowIsValid(idx)) {
+			continue;
+		}
+		const auto &val = data[idx];
+		if (!has_val) {
+			local_min = val;
+			local_max = val;
+			has_val = true;
+		} else {
+			if (val < local_min) {
+				local_min = val;
+			}
+			if (val > local_max) {
+				local_max = val;
+			}
+		}
+	}
+
+	if (!has_val) {
+		return;
+	}
+
+	Value vmin = Value::CreateValue(local_min);
+	Value vmax = Value::CreateValue(local_max);
+	if (!mm.has_value) {
+		mm.min_val = vmin;
+		mm.max_val = vmax;
+		mm.has_value = true;
+	} else {
+		if (vmin < mm.min_val) {
+			mm.min_val = vmin;
+		}
+		if (vmax > mm.max_val) {
+			mm.max_val = vmax;
+		}
+	}
+}
+
+static void UpdateMinMax(Vector &vec, idx_t count, ColumnMinMax &mm) {
+	auto &type = vec.GetType();
+	switch (type.id()) {
+	case LogicalTypeId::TINYINT:
+		TypedUpdateMinMax<int8_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::SMALLINT:
+		TypedUpdateMinMax<int16_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::INTEGER:
+		TypedUpdateMinMax<int32_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::BIGINT:
+		TypedUpdateMinMax<int64_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::UTINYINT:
+		TypedUpdateMinMax<uint8_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::USMALLINT:
+		TypedUpdateMinMax<uint16_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::UINTEGER:
+		TypedUpdateMinMax<uint32_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::UBIGINT:
+		TypedUpdateMinMax<uint64_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::FLOAT:
+		TypedUpdateMinMax<float>(vec, count, mm);
+		break;
+	case LogicalTypeId::DOUBLE:
+		TypedUpdateMinMax<double>(vec, count, mm);
+		break;
+	case LogicalTypeId::DATE:
+		TypedUpdateMinMax<date_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::TIMESTAMP:
+		TypedUpdateMinMax<timestamp_t>(vec, count, mm);
+		break;
+	case LogicalTypeId::VARCHAR:
+		TypedUpdateMinMax<string_t>(vec, count, mm);
+		break;
+	default:
+		break;
+	}
+}
+
+//===--------------------------------------------------------------------===//
 // Sink
 //===--------------------------------------------------------------------===//
 
@@ -126,7 +226,7 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
 		}
 	}
 
-	// TODO: min-max scanning uses GetValue() per row which is slow; switch to typed pointer access
+	// compute min-max using typed pointer access
 	if (is_forward_pass && !local_state.local_min_max.empty() && chunk.size() > 0) {
 		for (idx_t i = 0; i < bound_column_indices.size() && i < local_state.local_min_max.size(); i++) {
 			idx_t col_idx = bound_column_indices[i];
@@ -134,56 +234,7 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
 				continue;
 			}
 			auto &vec = chunk.data[col_idx];
-			auto &type = vec.GetType();
-			if (!type.IsNumeric() && type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::DATE &&
-			    type.id() != LogicalTypeId::TIMESTAMP) {
-				continue;
-			}
-
-			// compute min/max by scanning vector values
-			UnifiedVectorFormat vdata;
-			vec.ToUnifiedFormat(chunk.size(), vdata);
-
-			Value chunk_min, chunk_max;
-			bool has_stats = false;
-			for (idx_t row = 0; row < chunk.size(); row++) {
-				auto idx = vdata.sel->get_index(row);
-				if (!vdata.validity.RowIsValid(idx)) {
-					continue;
-				}
-				Value val = vec.GetValue(row);
-				if (val.IsNull()) {
-					continue;
-				}
-				if (!has_stats) {
-					chunk_min = val;
-					chunk_max = val;
-					has_stats = true;
-				} else {
-					if (val < chunk_min) {
-						chunk_min = val;
-					}
-					if (val > chunk_max) {
-						chunk_max = val;
-					}
-				}
-			}
-
-			if (has_stats) {
-				auto &mm = local_state.local_min_max[i];
-				if (!mm.has_value) {
-					mm.min_val = chunk_min;
-					mm.max_val = chunk_max;
-					mm.has_value = true;
-				} else {
-					if (chunk_min < mm.min_val) {
-						mm.min_val = chunk_min;
-					}
-					if (chunk_max > mm.max_val) {
-						mm.max_val = chunk_max;
-					}
-				}
-			}
+			UpdateMinMax(vec, chunk.size(), local_state.local_min_max[i]);
 		}
 	}
 
