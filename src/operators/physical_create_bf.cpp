@@ -285,6 +285,17 @@ static void PushDynamicFilters(const PhysicalCreateBF &op, const CreateBFGlobalS
 		return;
 	}
 
+	// if build side produced 0 rows, no probe-side rows can match — push always-false filter
+	if (gsink.total_data->Count() == 0) {
+		for (auto &target : op.pushdown_targets) {
+			auto always_false =
+			    make_uniq<ConstantFilter>(ExpressionType::COMPARE_GREATERTHAN, Value::MaximumValue(target.column_type));
+			target.dynamic_filters->PushFilter(op, target.scan_column_index, std::move(always_false));
+			D_PRINTF("[PUSHDOWN] pushed always-false for col %s (empty build side)", target.column_name.c_str());
+		}
+		return;
+	}
+
 	string filter_type = "all";
 	Value filter_type_val;
 	if (context.TryGetCurrentSetting("rpt_filter_type", filter_type_val)) {
