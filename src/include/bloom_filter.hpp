@@ -33,7 +33,7 @@ public:
 	void Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_built);
 
 	bool IsEmpty() const {
-		return !bf_.IsInitialized();
+		return !has_data_;
 	}
 
 	BloomFilter &GetNativeFilter() {
@@ -41,6 +41,7 @@ public:
 	}
 
 private:
+	bool has_data_ = false;
 	BloomFilter bf_;
 };
 

@@ -44,6 +44,7 @@ void PTBloomFilter::Insert(DataChunk &chunk, const vector<idx_t> &bound_cols_bui
 	if (count == 0) {
 		return;
 	}
+	has_data_ = true;
 	Vector hashes = HashColumns(chunk, bound_cols_built);
 	bf_.InsertHashes(hashes, count);
 }
