@@ -17,6 +17,7 @@ struct CreateBFStats {
 	idx_t sequence_number = 0;
 	idx_t build_table_idx = 0;
 	vector<idx_t> probe_table_indices;
+	bool is_forward_pass = false;
 	std::atomic<idx_t> rows_materialized {0};
 	std::atomic<int64_t> sink_time_us {0};
 	std::atomic<int64_t> finalize_time_us {0};
@@ -27,6 +28,7 @@ struct UseBFStats {
 	idx_t sequence_number = 0;
 	idx_t build_table_idx = 0;
 	idx_t probe_table_idx = 0;
+	bool is_forward_pass = false;
 	std::atomic<idx_t> rows_in {0};
 	std::atomic<idx_t> rows_out {0};
 	std::atomic<int64_t> probe_time_us {0};
@@ -71,11 +73,12 @@ public:
 	}
 
 	shared_ptr<CreateBFStats> RegisterCreateBF(idx_t build_table_idx, const vector<ColumnBinding> &probe_columns,
-	                                           idx_t sequence_number) {
+	                                           idx_t sequence_number, bool is_forward_pass) {
 		lock_guard<mutex> lock(stats_lock);
 		auto stats = make_shared_ptr<CreateBFStats>();
 		stats->sequence_number = sequence_number;
 		stats->build_table_idx = build_table_idx;
+		stats->is_forward_pass = is_forward_pass;
 		// extract unique probe table indices from probe columns
 		for (const auto &col : probe_columns) {
 			if (stats->probe_table_indices.empty() || stats->probe_table_indices.back() != col.table_index) {
@@ -96,12 +99,14 @@ public:
 		return stats;
 	}
 
-	shared_ptr<UseBFStats> RegisterUseBF(idx_t build_table_idx, idx_t probe_table_idx, idx_t sequence_number) {
+	shared_ptr<UseBFStats> RegisterUseBF(idx_t build_table_idx, idx_t probe_table_idx, idx_t sequence_number,
+	                                     bool is_forward_pass) {
 		lock_guard<mutex> lock(stats_lock);
 		auto stats = make_shared_ptr<UseBFStats>();
 		stats->sequence_number = sequence_number;
 		stats->build_table_idx = build_table_idx;
 		stats->probe_table_idx = probe_table_idx;
+		stats->is_forward_pass = is_forward_pass;
 		use_bf_stats.push_back(stats);
 		return stats;
 	}
@@ -134,14 +139,16 @@ public:
 		std::sort(entries.begin(), entries.end(),
 		          [](const StatsEntry &a, const StatsEntry &b) { return a.seq < b.seq; });
 
-		int64_t total_rows_in = 0, total_rows_out = 0;
-		int64_t total_probe_us = 0;
+		// per-pass accumulators
+		int64_t fwd_rows_in = 0, fwd_rows_out = 0, fwd_probe_us = 0;
+		int64_t bwd_rows_in = 0, bwd_rows_out = 0, bwd_probe_us = 0;
 		int64_t total_sink_us = 0, total_source_us = 0, total_finalize_us = 0;
 
 		Printer::Print("");
 		for (auto &e : entries) {
 			if (e.is_create) {
 				auto &s = create_bf_stats[e.idx];
+				string pass = s->is_forward_pass ? "FWD" : "BWD";
 				string probe_names;
 				for (size_t pi = 0; pi < s->probe_table_indices.size(); pi++) {
 					if (pi > 0)
@@ -151,8 +158,8 @@ public:
 				if (probe_names.empty())
 					probe_names = "?";
 				Printer::PrintF(
-				    "CREATE_BF: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
-				    GetName(s->build_table_idx).c_str(), probe_names.c_str(),
+				    "CREATE_BF [%s]: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
+				    pass.c_str(), GetName(s->build_table_idx).c_str(), probe_names.c_str(),
 				    (unsigned long long)s->rows_materialized.load(), (long long)s->sink_time_us.load(),
 				    (long long)s->finalize_time_us.load(), (long long)s->source_time_us.load());
 				total_sink_us += s->sink_time_us.load();
@@ -160,16 +167,23 @@ public:
 				total_finalize_us += s->finalize_time_us.load();
 			} else {
 				auto &s = use_bf_stats[e.idx];
+				string pass = s->is_forward_pass ? "FWD" : "BWD";
 				idx_t ri = s->rows_in.load();
 				idx_t ro = s->rows_out.load();
 				double sel = ri > 0 ? 100.0 * (double)ro / ri : 0.0;
-				Printer::PrintF("USE_BF:    [build=%s, probe=%s] in=%llu, out=%llu, sel=%.1f%%, probe=%lldus",
-				                GetName(s->build_table_idx).c_str(), GetName(s->probe_table_idx).c_str(),
-				                (unsigned long long)ri, (unsigned long long)ro, sel,
-				                (long long)s->probe_time_us.load());
-				total_rows_in += ri;
-				total_rows_out += ro;
-				total_probe_us += s->probe_time_us.load();
+				Printer::PrintF("USE_BF    [%s]: [build=%s, probe=%s] in=%llu, out=%llu, sel=%.1f%%, probe=%lldus",
+				                pass.c_str(), GetName(s->build_table_idx).c_str(),
+				                GetName(s->probe_table_idx).c_str(), (unsigned long long)ri, (unsigned long long)ro,
+				                sel, (long long)s->probe_time_us.load());
+				if (s->is_forward_pass) {
+					fwd_rows_in += ri;
+					fwd_rows_out += ro;
+					fwd_probe_us += s->probe_time_us.load();
+				} else {
+					bwd_rows_in += ri;
+					bwd_rows_out += ro;
+					bwd_probe_us += s->probe_time_us.load();
+				}
 			}
 		}
 
@@ -177,11 +191,26 @@ public:
 		Printer::PrintF("  sink: %lld us", (long long)total_sink_us);
 		Printer::PrintF("  source: %lld us", (long long)total_source_us);
 		Printer::PrintF("  finalize (BF build): %lld us", (long long)total_finalize_us);
-		Printer::PrintF("  probe: %lld us", (long long)total_probe_us);
+
+		auto print_pass_stats = [](const char *label, int64_t rows_in, int64_t rows_out, int64_t probe_us) {
+			if (rows_in > 0) {
+				double filtered_pct = 100.0 * (1.0 - (double)rows_out / rows_in);
+				Printer::PrintF("  %s probe: %lld us, filtered: %lld / %lld rows (%.1f%% removed)", label,
+				                (long long)probe_us, (long long)(rows_in - rows_out), (long long)rows_in,
+				                filtered_pct);
+			}
+		};
+
+		print_pass_stats("forward", fwd_rows_in, fwd_rows_out, fwd_probe_us);
+		print_pass_stats("backward", bwd_rows_in, bwd_rows_out, bwd_probe_us);
+
+		int64_t total_rows_in = fwd_rows_in + bwd_rows_in;
+		int64_t total_rows_out = fwd_rows_out + bwd_rows_out;
 		if (total_rows_in > 0) {
 			double filtered_pct = 100.0 * (1.0 - (double)total_rows_out / total_rows_in);
-			Printer::PrintF("  filtered: %lld / %lld rows (%.1f%% removed)",
-			                (long long)(total_rows_in - total_rows_out), (long long)total_rows_in, filtered_pct);
+			Printer::PrintF("  total probe: %lld us, filtered: %lld / %lld rows (%.1f%% removed)",
+			                (long long)(fwd_probe_us + bwd_probe_us), (long long)(total_rows_in - total_rows_out),
+			                (long long)total_rows_in, filtered_pct);
 		}
 		Printer::Print("=== END RPT PROFILING ===\n");
 	}

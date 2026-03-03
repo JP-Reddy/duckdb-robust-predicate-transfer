@@ -204,7 +204,7 @@ SinkResultType PhysicalCreateBF::Sink(ExecutionContext &context, DataChunk &chun
 		auto prof = GetRPTProfilingState(context.client);
 		if (prof) {
 			profiling_stats = prof->RegisterCreateBF(bf_operation->build_table_idx, bf_operation->probe_columns,
-			                                         bf_operation->sequence_number);
+			                                         bf_operation->sequence_number, is_forward_pass);
 		}
 	}
 
@@ -347,7 +347,7 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 		auto prof = GetRPTProfilingState(context);
 		if (prof) {
 			profiling_stats = prof->RegisterCreateBF(bf_operation->build_table_idx, bf_operation->probe_columns,
-			                                         bf_operation->sequence_number);
+			                                         bf_operation->sequence_number, is_forward_pass);
 		}
 	}
 
