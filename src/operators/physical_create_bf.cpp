@@ -334,8 +334,7 @@ static void PushDynamicFilters(const PhysicalCreateBF &op, const CreateBFGlobalS
 
 			if (push_minmax && i < gsink.column_min_max.size() && gsink.column_min_max[i].has_value) {
 				auto &mm = gsink.column_min_max[i];
-				auto min_filter =
-				    make_uniq<ConstantFilter>(ExpressionType::COMPARE_GREATERTHANOREQUALTO, mm.min_val);
+				auto min_filter = make_uniq<ConstantFilter>(ExpressionType::COMPARE_GREATERTHANOREQUALTO, mm.min_val);
 				target.dynamic_filters->PushFilter(op, target.scan_column_index, std::move(min_filter));
 
 				auto max_filter = make_uniq<ConstantFilter>(ExpressionType::COMPARE_LESSTHANOREQUALTO, mm.max_val);
