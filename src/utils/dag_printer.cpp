@@ -229,18 +229,48 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 	return result;
 }
 
+TreeNode *FindNodeInTree(TreeNode *root, idx_t table_idx) {
+	if (!root) {
+		return nullptr;
+	}
+	if (root->table_idx == table_idx) {
+		return root;
+	}
+	for (auto *child : root->children) {
+		auto *found = FindNodeInTree(child, table_idx);
+		if (found) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+void SetTreeLevels(TreeNode *node, int level) {
+	if (!node) {
+		return;
+	}
+	node->level = level;
+	for (auto *child : node->children) {
+		SetTreeLevels(child, level + 1);
+	}
+}
+
 void PrintTransferDAG(TreeNode *root, TableManager &table_mgr) {
+	PrintTransferDAG(root, table_mgr, "DAG");
+}
+
+void PrintTransferDAG(TreeNode *root, TableManager &table_mgr, const string &title) {
 	if (!root) {
 		return;
 	}
 
 	RenderedBlock block = RenderSubtree(root, table_mgr);
 
-	Printer::Print("\n=== DAG ===");
+	Printer::Print("\n=== " + title + " ===");
 	for (auto &line : block.lines) {
 		Printer::Print(line);
 	}
-	Printer::Print("=== DAG ===\n");
+	Printer::Print("=== " + title + " ===\n");
 }
 
 } // namespace duckdb

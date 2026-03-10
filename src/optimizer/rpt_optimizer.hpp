@@ -94,6 +94,10 @@ public:
 	// print DAG as ASCII tree (gated by rpt_display_dag setting)
 	void PrintDAG(TreeNode *root);
 
+	// build and print DAG from DuckDB's join order (gated by rpt_display_physical_dag)
+	TreeNode *BuildPhysicalPlanTree(LogicalOperator *op, vector<JoinEdge> &edges);
+	void PrintPhysicalPlanDAG(LogicalOperator *op, vector<JoinEdge> &edges);
+
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 
 	unique_ptr<LogicalOperator> Optimize(unique_ptr<LogicalOperator> plan);

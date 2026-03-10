@@ -475,6 +475,148 @@ void RPTOptimizerContextState::PrintDAG(TreeNode *root) {
 	PrintTransferDAG(root, table_mgr);
 }
 
+// helper: collect all base table indices in a subtree
+static void CollectBaseTableIndices(LogicalOperator *op, TableManager &table_mgr, unordered_set<idx_t> &indices) {
+	if (!op) {
+		return;
+	}
+	auto *info = table_mgr.GetTableInfo(op);
+	if (info) {
+		indices.insert(info->table_idx);
+		return;
+	}
+	for (auto &child : op->children) {
+		CollectBaseTableIndices(child.get(), table_mgr, indices);
+	}
+}
+
+// helper: find edge connecting a table from set a to a table from set b
+static JoinEdge *FindMatchingEdge(vector<JoinEdge> &edges, const unordered_set<idx_t> &probe_tables,
+                                  const unordered_set<idx_t> &build_tables) {
+	for (auto &edge : edges) {
+		if ((probe_tables.count(edge.table_a) && build_tables.count(edge.table_b)) ||
+		    (probe_tables.count(edge.table_b) && build_tables.count(edge.table_a))) {
+			return &edge;
+		}
+	}
+	return nullptr;
+}
+
+TreeNode *RPTOptimizerContextState::BuildPhysicalPlanTree(LogicalOperator *op, vector<JoinEdge> &edges) {
+	if (!op) {
+		return nullptr;
+	}
+
+	// leaf: registered base table
+	auto *info = table_mgr.GetTableInfo(op);
+	if (info) {
+		return new TreeNode(info->table_idx, info->table_op);
+	}
+
+	// join: split into probe (left) and build (right)
+	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN ||
+	    op->type == LogicalOperatorType::LOGICAL_DELIM_JOIN) {
+		auto &join = op->Cast<LogicalComparisonJoin>();
+
+		// skip mark joins — internal joins we don't care about
+		if (join.join_type == JoinType::MARK) {
+			return BuildPhysicalPlanTree(op->children[0].get(), edges);
+		}
+
+		TreeNode *probe_root = BuildPhysicalPlanTree(op->children[0].get(), edges);
+		TreeNode *build_root = BuildPhysicalPlanTree(op->children[1].get(), edges);
+
+		if (probe_root && build_root) {
+			// extract the table pair from this join's conditions
+			idx_t probe_table_idx = 0, build_table_idx = 0;
+			bool found_pair = false;
+
+			unordered_set<idx_t> probe_tables, build_tables;
+			CollectBaseTableIndices(op->children[0].get(), table_mgr, probe_tables);
+			CollectBaseTableIndices(op->children[1].get(), table_mgr, build_tables);
+
+			for (const JoinCondition &cond : join.conditions) {
+				if (cond.GetComparisonType() != ExpressionType::COMPARE_EQUAL) {
+					continue;
+				}
+				if (cond.GetLHS().type != ExpressionType::BOUND_COLUMN_REF ||
+				    cond.GetRHS().type != ExpressionType::BOUND_COLUMN_REF) {
+					continue;
+				}
+				ColumnBinding left_resolved =
+				    ResolveColumnBinding(cond.GetLHS().Cast<BoundColumnRefExpression>().binding);
+				ColumnBinding right_resolved =
+				    ResolveColumnBinding(cond.GetRHS().Cast<BoundColumnRefExpression>().binding);
+
+				idx_t lt = left_resolved.table_index;
+				idx_t rt = right_resolved.table_index;
+				if (probe_tables.count(lt) && build_tables.count(rt)) {
+					probe_table_idx = lt;
+					build_table_idx = rt;
+					found_pair = true;
+					break;
+				} else if (probe_tables.count(rt) && build_tables.count(lt)) {
+					probe_table_idx = rt;
+					build_table_idx = lt;
+					found_pair = true;
+					break;
+				}
+			}
+
+			// find the matching JoinEdge for edge label
+			JoinEdge *edge = nullptr;
+			if (found_pair) {
+				for (auto &e : edges) {
+					if ((e.table_a == probe_table_idx && e.table_b == build_table_idx) ||
+					    (e.table_a == build_table_idx && e.table_b == probe_table_idx)) {
+						edge = &e;
+						break;
+					}
+				}
+			}
+
+			// attach build_root at the specific probe-side table
+			TreeNode *attach_point = probe_root;
+			if (found_pair) {
+				TreeNode *specific = FindNodeInTree(probe_root, probe_table_idx);
+				if (specific) {
+					attach_point = specific;
+				}
+			}
+
+			build_root->parent = attach_point;
+			build_root->edge_to_parent = edge;
+			attach_point->children.push_back(build_root);
+
+			return probe_root;
+		}
+		return probe_root ? probe_root : build_root;
+	}
+
+	// other operators: recurse into children
+	for (auto &child : op->children) {
+		TreeNode *result = BuildPhysicalPlanTree(child.get(), edges);
+		if (result) {
+			return result;
+		}
+	}
+	return nullptr;
+}
+
+void RPTOptimizerContextState::PrintPhysicalPlanDAG(LogicalOperator *op, vector<JoinEdge> &edges) {
+	Value val;
+	if (!context.TryGetCurrentSetting("rpt_display_physical_dag", val) || !val.GetValue<bool>()) {
+		return;
+	}
+
+	TreeNode *root = BuildPhysicalPlanTree(op, edges);
+	if (!root) {
+		return;
+	}
+	SetTreeLevels(root, 0);
+	PrintTransferDAG(root, table_mgr, "Physical Plan DAG");
+}
+
 std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
           unordered_map<LogicalOperator *, vector<BloomFilterOperation>>>
 RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
@@ -992,6 +1134,10 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	if (edges.size() <= 1) {
 		return plan;
 	}
+
+	// display physical plan DAG if enabled (before we modify the plan)
+	PrintPhysicalPlanDAG(plan.get(), edges);
+
 	// step 2: create transfer graph using LargestRoot algorithm
 	mst_edges = LargestRoot(edges);
 
