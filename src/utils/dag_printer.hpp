@@ -6,6 +6,7 @@
 namespace duckdb {
 
 struct TreeNode;
+struct PhysicalDAGNode;
 
 // tree utilities
 TreeNode *FindNodeInTree(TreeNode *root, idx_t table_idx);
@@ -14,5 +15,8 @@ void SetTreeLevels(TreeNode *node, int level);
 // render and print the RPT transfer DAG as an ASCII tree
 void PrintTransferDAG(TreeNode *root, TableManager &table_mgr);
 void PrintTransferDAG(TreeNode *root, TableManager &table_mgr, const string &title);
+
+// render and print the physical plan DAG (supports multiple roots/parents)
+void PrintPhysicalDAG(vector<PhysicalDAGNode *> &all_nodes, TableManager &table_mgr);
 
 } // namespace duckdb

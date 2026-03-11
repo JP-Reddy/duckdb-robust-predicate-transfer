@@ -273,4 +273,229 @@ void PrintTransferDAG(TreeNode *root, TableManager &table_mgr, const string &tit
 	Printer::Print("=== " + title + " ===\n");
 }
 
+void PrintPhysicalDAG(vector<PhysicalDAGNode *> &all_nodes, TableManager &table_mgr) {
+	if (all_nodes.empty()) {
+		return;
+	}
+
+	// group by level
+	map<int, vector<PhysicalDAGNode *>> by_level;
+	int max_level = 0;
+	for (auto *node : all_nodes) {
+		by_level[node->level].push_back(node);
+		max_level = std::max(max_level, node->level);
+	}
+
+	// create boxes for all nodes
+	map<PhysicalDAGNode *, RenderedBlock> boxes;
+	for (auto *node : all_nodes) {
+		string table_name = table_mgr.GetTableName(node->table_idx);
+		string name_line = table_name + " (table " + std::to_string(node->table_idx) + ")";
+		string card_line = FormatCardinality(node->table_op->estimated_cardinality);
+		boxes[node] = MakeBox(name_line, card_line);
+	}
+
+	// compute level widths and box offsets within each level
+	const int level_gap = 4;
+	map<int, int> level_widths;
+	map<int, vector<int>> level_offsets;
+
+	for (int level = 0; level <= max_level; level++) {
+		auto &nodes = by_level[level];
+		int width = 0;
+		level_offsets[level] = {};
+		for (idx_t i = 0; i < nodes.size(); i++) {
+			level_offsets[level].push_back(width);
+			int box_width = 0;
+			for (auto &line : boxes[nodes[i]].lines) {
+				box_width = std::max(box_width, (int)line.size());
+			}
+			width += box_width;
+			if (i + 1 < nodes.size()) {
+				width += level_gap;
+			}
+		}
+		level_widths[level] = width;
+	}
+
+	int total_width = 0;
+	for (auto &entry : level_widths) {
+		total_width = std::max(total_width, entry.second);
+	}
+
+	// center each level within total_width and record absolute node centers
+	map<PhysicalDAGNode *, int> node_centers;
+
+	for (int level = 0; level <= max_level; level++) {
+		int shift = (total_width - level_widths[level]) / 2;
+		auto &nodes = by_level[level];
+		for (idx_t i = 0; i < nodes.size(); i++) {
+			node_centers[nodes[i]] = shift + level_offsets[level][i] + boxes[nodes[i]].center;
+		}
+	}
+
+	// render level by level
+	vector<string> output;
+
+	for (int level = 0; level <= max_level; level++) {
+		auto &nodes = by_level[level];
+		int shift = (total_width - level_widths[level]) / 2;
+
+		// render boxes
+		int max_height = 0;
+		for (auto *node : nodes) {
+			max_height = std::max(max_height, (int)boxes[node].lines.size());
+		}
+
+		for (int row = 0; row < max_height; row++) {
+			string line(total_width, ' ');
+			for (idx_t i = 0; i < nodes.size(); i++) {
+				auto &box = boxes[nodes[i]];
+				if (row < (int)box.lines.size()) {
+					int offset = shift + level_offsets[level][i];
+					for (idx_t j = 0; j < box.lines[row].size() && offset + (int)j < total_width; j++) {
+						line[offset + j] = box.lines[row][j];
+					}
+				}
+			}
+			output.push_back(line);
+		}
+
+		// draw connectors to next level
+		if (level >= max_level) {
+			continue;
+		}
+
+		auto &children = by_level[level + 1];
+
+		// collect parent->child connections for this level transition
+		struct ConnInfo {
+			int child_center;
+			vector<int> parent_centers;
+			vector<string> edge_labels;
+		};
+		vector<ConnInfo> conns;
+
+		for (auto *child : children) {
+			ConnInfo info;
+			info.child_center = node_centers[child];
+
+			for (idx_t pi = 0; pi < child->parents.size(); pi++) {
+				auto *parent = child->parents[pi];
+				if (parent->level != level) {
+					continue;
+				}
+				info.parent_centers.push_back(node_centers[parent]);
+
+				if (pi < child->edges_to_parents.size()) {
+					auto &edge = child->edges_to_parents[pi];
+					string label = table_mgr.GetColumnName(edge.parent_table, edge.parent_col.column_index) + " / " +
+					               table_mgr.GetColumnName(edge.child_table, edge.child_col.column_index);
+					info.edge_labels.push_back(label);
+				}
+			}
+
+			if (!info.parent_centers.empty()) {
+				conns.push_back(info);
+			}
+		}
+
+		if (conns.empty()) {
+			continue;
+		}
+
+		// determine connector width
+		int conn_width = total_width;
+		for (auto &info : conns) {
+			for (int pc : info.parent_centers) {
+				conn_width = std::max(conn_width, pc + 1);
+			}
+			conn_width = std::max(conn_width, info.child_center + 1);
+			for (auto &lbl : info.edge_labels) {
+				conn_width = std::max(conn_width, (int)lbl.size() + 2);
+			}
+		}
+
+		// vertical lines from parents
+		string vert1(conn_width, ' ');
+		for (auto &info : conns) {
+			for (int pc : info.parent_centers) {
+				if (pc >= 0 && pc < conn_width) {
+					vert1[pc] = '|';
+				}
+			}
+		}
+		output.push_back(vert1);
+
+		// branch line (when parent and child not aligned, or multiple parents)
+		string branch(conn_width, ' ');
+		bool need_branch = false;
+
+		for (auto &info : conns) {
+			vector<int> all_pos = info.parent_centers;
+			all_pos.push_back(info.child_center);
+			int leftmost = *std::min_element(all_pos.begin(), all_pos.end());
+			int rightmost = *std::max_element(all_pos.begin(), all_pos.end());
+
+			if (leftmost != rightmost) {
+				need_branch = true;
+				for (int c = leftmost; c <= rightmost && c < conn_width; c++) {
+					branch[c] = '-';
+				}
+				for (int pc : info.parent_centers) {
+					if (pc >= 0 && pc < conn_width) {
+						branch[pc] = '+';
+					}
+				}
+				if (info.child_center >= 0 && info.child_center < conn_width) {
+					branch[info.child_center] = '+';
+				}
+			}
+		}
+		if (need_branch) {
+			output.push_back(branch);
+		}
+
+		// edge labels
+		string label_line(conn_width, ' ');
+		bool has_labels = false;
+		for (auto &info : conns) {
+			for (idx_t i = 0; i < info.edge_labels.size(); i++) {
+				string &lbl = info.edge_labels[i];
+				if (lbl.empty()) {
+					continue;
+				}
+				int center = info.parent_centers[i];
+				int start = center - (int)lbl.size() / 2;
+				if (start < 0) {
+					start = 0;
+				}
+				for (idx_t j = 0; j < lbl.size() && start + (int)j < conn_width; j++) {
+					label_line[start + j] = lbl[j];
+				}
+				has_labels = true;
+			}
+		}
+		if (has_labels) {
+			output.push_back(label_line);
+		}
+
+		// vertical lines to children
+		string vert2(conn_width, ' ');
+		for (auto &info : conns) {
+			if (info.child_center >= 0 && info.child_center < conn_width) {
+				vert2[info.child_center] = '|';
+			}
+		}
+		output.push_back(vert2);
+	}
+
+	// print
+	Printer::Print("\n=== Physical Plan DAG ===");
+	for (auto &line : output) {
+		Printer::Print(line);
+	}
+	Printer::Print("=== Physical Plan DAG ===\n");
+}
+
 } // namespace duckdb

@@ -490,131 +490,224 @@ static void CollectBaseTableIndices(LogicalOperator *op, TableManager &table_mgr
 	}
 }
 
-// helper: find edge connecting a table from set a to a table from set b
-static JoinEdge *FindMatchingEdge(vector<JoinEdge> &edges, const unordered_set<idx_t> &probe_tables,
-                                  const unordered_set<idx_t> &build_tables) {
-	for (auto &edge : edges) {
-		if ((probe_tables.count(edge.table_a) && build_tables.count(edge.table_b)) ||
-		    (probe_tables.count(edge.table_b) && build_tables.count(edge.table_a))) {
-			return &edge;
-		}
+// union-find helpers for column equivalence classes
+using ColKey = std::pair<idx_t, idx_t>; // (table_idx, column_idx)
+
+static ColKey UFFind(map<ColKey, ColKey> &parent, ColKey x) {
+	if (parent.find(x) == parent.end()) {
+		parent[x] = x;
 	}
-	return nullptr;
+	while (parent[x] != x) {
+		parent[x] = parent[parent[x]];
+		x = parent[x];
+	}
+	return x;
 }
 
-TreeNode *RPTOptimizerContextState::BuildPhysicalPlanTree(LogicalOperator *op, vector<JoinEdge> &edges) {
+static void UFUnion(map<ColKey, ColKey> &parent, ColKey a, ColKey b) {
+	a = UFFind(parent, a);
+	b = UFFind(parent, b);
+	if (a != b) {
+		parent[a] = b;
+	}
+}
+
+// recursive DFS for building physical DAG
+// uses build-first traversal so DFS index matches execution order
+// (first-executed = lowest index, last-executed = highest index)
+static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RPTOptimizerContextState &state,
+                           vector<PhysicalDAGNode *> &all_nodes, map<idx_t, PhysicalDAGNode *> &node_map,
+                           map<idx_t, int> &dfs_index, map<ColKey, ColKey> &uf_parent) {
 	if (!op) {
-		return nullptr;
+		return;
 	}
 
-	// leaf: registered base table
+	// base case: registered base table
 	auto *info = table_mgr.GetTableInfo(op);
 	if (info) {
-		return new TreeNode(info->table_idx, info->table_op);
+		auto *node = new PhysicalDAGNode(info->table_idx, info->table_op);
+		all_nodes.push_back(node);
+		node_map[info->table_idx] = node;
+		dfs_index[info->table_idx] = (int)all_nodes.size() - 1;
+		return;
 	}
 
-	// join: split into probe (left) and build (right)
+	// join node
 	if (op->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN ||
 	    op->type == LogicalOperatorType::LOGICAL_DELIM_JOIN) {
 		auto &join = op->Cast<LogicalComparisonJoin>();
 
-		// skip mark joins — internal joins we don't care about
 		if (join.join_type == JoinType::MARK) {
-			return BuildPhysicalPlanTree(op->children[0].get(), edges);
+			PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
+			return;
 		}
 
-		TreeNode *probe_root = BuildPhysicalPlanTree(op->children[0].get(), edges);
-		TreeNode *build_root = BuildPhysicalPlanTree(op->children[1].get(), edges);
+		// build-first: visit right child (build) first, then left child (probe)
+		// this gives execution order: first-executed tables get lowest DFS index
+		PhysicalDAGDFS(op->children[1].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
+		PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
 
-		if (probe_root && build_root) {
-			// extract the table pair from this join's conditions
-			idx_t probe_table_idx = 0, build_table_idx = 0;
-			bool found_pair = false;
+		// process each join condition
+		for (const JoinCondition &cond : join.conditions) {
+			if (cond.GetComparisonType() != ExpressionType::COMPARE_EQUAL) {
+				continue;
+			}
+			if (cond.GetLHS().type != ExpressionType::BOUND_COLUMN_REF ||
+			    cond.GetRHS().type != ExpressionType::BOUND_COLUMN_REF) {
+				continue;
+			}
 
-			unordered_set<idx_t> probe_tables, build_tables;
-			CollectBaseTableIndices(op->children[0].get(), table_mgr, probe_tables);
-			CollectBaseTableIndices(op->children[1].get(), table_mgr, build_tables);
+			ColumnBinding left_resolved =
+			    state.ResolveColumnBinding(cond.GetLHS().Cast<BoundColumnRefExpression>().binding);
+			ColumnBinding right_resolved =
+			    state.ResolveColumnBinding(cond.GetRHS().Cast<BoundColumnRefExpression>().binding);
 
-			for (const JoinCondition &cond : join.conditions) {
-				if (cond.GetComparisonType() != ExpressionType::COMPARE_EQUAL) {
+			// add to equivalence classes
+			ColKey left_key = {left_resolved.table_index, left_resolved.column_index};
+			ColKey right_key = {right_resolved.table_index, right_resolved.column_index};
+			UFUnion(uf_parent, left_key, right_key);
+
+			idx_t table_a = left_resolved.table_index;
+			idx_t table_b = right_resolved.table_index;
+			if (!node_map.count(table_a) || !node_map.count(table_b)) {
+				continue;
+			}
+			if (table_a == table_b) {
+				continue;
+			}
+
+			int idx_a = dfs_index.count(table_a) ? dfs_index[table_a] : -1;
+			int idx_b = dfs_index.count(table_b) ? dfs_index[table_b] : -1;
+
+			// higher DFS index = later execution = parent (closer to root/top)
+			idx_t parent_idx, child_idx;
+			ColumnBinding parent_col, child_col;
+			if (idx_a > idx_b) {
+				parent_idx = table_a;
+				parent_col = left_resolved;
+				child_idx = table_b;
+				child_col = right_resolved;
+			} else {
+				parent_idx = table_b;
+				parent_col = right_resolved;
+				child_idx = table_a;
+				child_col = left_resolved;
+			}
+
+			// equiv resolution on child side: find shallowest equivalent (highest DFS, != parent)
+			ColKey child_root = UFFind(uf_parent, {child_col.table_index, child_col.column_index});
+			idx_t best_child = child_idx;
+			int best_child_dfs = dfs_index.count(child_idx) ? dfs_index[child_idx] : -1;
+			ColumnBinding best_child_col = child_col;
+
+			vector<ColKey> all_keys;
+			for (auto &entry : uf_parent) {
+				all_keys.push_back(entry.first);
+			}
+			for (auto &key : all_keys) {
+				if (UFFind(uf_parent, key) != child_root) {
 					continue;
 				}
-				if (cond.GetLHS().type != ExpressionType::BOUND_COLUMN_REF ||
-				    cond.GetRHS().type != ExpressionType::BOUND_COLUMN_REF) {
+				idx_t candidate = key.first;
+				if (candidate == parent_idx) {
 					continue;
 				}
-				ColumnBinding left_resolved =
-				    ResolveColumnBinding(cond.GetLHS().Cast<BoundColumnRefExpression>().binding);
-				ColumnBinding right_resolved =
-				    ResolveColumnBinding(cond.GetRHS().Cast<BoundColumnRefExpression>().binding);
+				if (!node_map.count(candidate)) {
+					continue;
+				}
+				int candidate_dfs = dfs_index.count(candidate) ? dfs_index[candidate] : -1;
+				if (candidate_dfs > best_child_dfs) {
+					best_child = candidate;
+					best_child_dfs = candidate_dfs;
+					best_child_col = ColumnBinding(key.first, key.second);
+				}
+			}
 
-				idx_t lt = left_resolved.table_index;
-				idx_t rt = right_resolved.table_index;
-				if (probe_tables.count(lt) && build_tables.count(rt)) {
-					probe_table_idx = lt;
-					build_table_idx = rt;
-					found_pair = true;
+			auto *parent_node = node_map[parent_idx];
+			auto *child_node = node_map[best_child];
+
+			// check if already linked
+			bool already_linked = false;
+			for (auto *p : child_node->parents) {
+				if (p == parent_node) {
+					already_linked = true;
 					break;
-				} else if (probe_tables.count(rt) && build_tables.count(lt)) {
-					probe_table_idx = rt;
-					build_table_idx = lt;
-					found_pair = true;
-					break;
 				}
 			}
 
-			// find the matching JoinEdge for edge label
-			JoinEdge *edge = nullptr;
-			if (found_pair) {
-				for (auto &e : edges) {
-					if ((e.table_a == probe_table_idx && e.table_b == build_table_idx) ||
-					    (e.table_a == build_table_idx && e.table_b == probe_table_idx)) {
-						edge = &e;
-						break;
-					}
-				}
+			if (!already_linked) {
+				child_node->parents.push_back(parent_node);
+				parent_node->children.push_back(child_node);
+
+				PhysicalDAGEdge edge;
+				edge.parent_table = parent_idx;
+				edge.child_table = best_child;
+				edge.parent_col = parent_col;
+				edge.child_col = best_child_col;
+				child_node->edges_to_parents.push_back(edge);
 			}
-
-			// attach build_root at the specific probe-side table
-			TreeNode *attach_point = probe_root;
-			if (found_pair) {
-				TreeNode *specific = FindNodeInTree(probe_root, probe_table_idx);
-				if (specific) {
-					attach_point = specific;
-				}
-			}
-
-			build_root->parent = attach_point;
-			build_root->edge_to_parent = edge;
-			attach_point->children.push_back(build_root);
-
-			return probe_root;
 		}
-		return probe_root ? probe_root : build_root;
+		return;
 	}
 
 	// other operators: recurse into children
 	for (auto &child : op->children) {
-		TreeNode *result = BuildPhysicalPlanTree(child.get(), edges);
-		if (result) {
-			return result;
-		}
+		PhysicalDAGDFS(child.get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
 	}
-	return nullptr;
 }
 
-void RPTOptimizerContextState::PrintPhysicalPlanDAG(LogicalOperator *op, vector<JoinEdge> &edges) {
+vector<PhysicalDAGNode *> RPTOptimizerContextState::BuildPhysicalPlanDAG(LogicalOperator *op) {
+	vector<PhysicalDAGNode *> all_nodes;
+	map<idx_t, PhysicalDAGNode *> node_map;
+	map<idx_t, int> dfs_index;
+	map<ColKey, ColKey> uf_parent;
+
+	PhysicalDAGDFS(op, table_mgr, *this, all_nodes, node_map, dfs_index, uf_parent);
+
+	// compute levels: roots (no parents) get 0, others get max(parent levels) + 1
+	for (auto *node : all_nodes) {
+		node->level = node->parents.empty() ? 0 : -1;
+	}
+	bool changed = true;
+	while (changed) {
+		changed = false;
+		for (auto *node : all_nodes) {
+			if (node->parents.empty()) {
+				continue;
+			}
+			int max_parent = -1;
+			bool all_set = true;
+			for (auto *p : node->parents) {
+				if (p->level < 0) {
+					all_set = false;
+					break;
+				}
+				max_parent = std::max(max_parent, p->level);
+			}
+			if (all_set && max_parent >= 0) {
+				int new_level = max_parent + 1;
+				if (new_level != node->level) {
+					node->level = new_level;
+					changed = true;
+				}
+			}
+		}
+	}
+
+	return all_nodes;
+}
+
+void RPTOptimizerContextState::PrintPhysicalPlanDAG(LogicalOperator *op) {
 	Value val;
 	if (!context.TryGetCurrentSetting("rpt_display_physical_dag", val) || !val.GetValue<bool>()) {
 		return;
 	}
 
-	TreeNode *root = BuildPhysicalPlanTree(op, edges);
-	if (!root) {
+	auto all_nodes = BuildPhysicalPlanDAG(op);
+	if (all_nodes.empty()) {
 		return;
 	}
-	SetTreeLevels(root, 0);
-	PrintTransferDAG(root, table_mgr, "Physical Plan DAG");
+	PrintPhysicalDAG(all_nodes, table_mgr);
 }
 
 std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
@@ -1136,7 +1229,7 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	}
 
 	// display physical plan DAG if enabled (before we modify the plan)
-	PrintPhysicalPlanDAG(plan.get(), edges);
+	PrintPhysicalPlanDAG(plan.get());
 
 	// step 2: create transfer graph using LargestRoot algorithm
 	mst_edges = LargestRoot(edges);

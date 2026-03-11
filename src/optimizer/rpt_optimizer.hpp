@@ -10,7 +10,7 @@
 
 namespace duckdb {
 
-// tree node for rooted MST representation
+// tree node for rooted MST representation (used by RPT DAG)
 struct TreeNode {
 	idx_t table_idx;
 	LogicalOperator *table_op;
@@ -21,6 +21,27 @@ struct TreeNode {
 
 	TreeNode(idx_t idx, LogicalOperator *op)
 	    : table_idx(idx), table_op(op), parent(nullptr), level(0), edge_to_parent(nullptr) {
+	}
+};
+
+// edge in physical plan DAG (stores resolved column bindings for label)
+struct PhysicalDAGEdge {
+	idx_t parent_table;
+	idx_t child_table;
+	ColumnBinding parent_col;
+	ColumnBinding child_col;
+};
+
+// node in physical plan DAG (supports multiple parents for multi-way joins)
+struct PhysicalDAGNode {
+	idx_t table_idx;
+	LogicalOperator *table_op;
+	vector<PhysicalDAGNode *> children;
+	vector<PhysicalDAGNode *> parents;
+	vector<PhysicalDAGEdge> edges_to_parents; // one per parent, same ordering
+	int level;
+
+	PhysicalDAGNode(idx_t idx, LogicalOperator *op) : table_idx(idx), table_op(op), level(0) {
 	}
 };
 
@@ -95,8 +116,8 @@ public:
 	void PrintDAG(TreeNode *root);
 
 	// build and print DAG from DuckDB's join order (gated by rpt_display_physical_dag)
-	TreeNode *BuildPhysicalPlanTree(LogicalOperator *op, vector<JoinEdge> &edges);
-	void PrintPhysicalPlanDAG(LogicalOperator *op, vector<JoinEdge> &edges);
+	vector<PhysicalDAGNode *> BuildPhysicalPlanDAG(LogicalOperator *op);
+	void PrintPhysicalPlanDAG(LogicalOperator *op);
 
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 
