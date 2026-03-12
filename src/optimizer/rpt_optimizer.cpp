@@ -525,11 +525,19 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RPTOpti
 	// base case: registered base table
 	auto *info = table_mgr.GetTableInfo(op);
 	if (info) {
-		auto *node = new PhysicalDAGNode(info->table_idx, info->table_op);
-		all_nodes.push_back(node);
-		node_map[info->table_idx] = node;
-		dfs_index[info->table_idx] = (int)all_nodes.size() - 1;
-		return;
+		bool is_leaf = (op->type == LogicalOperatorType::LOGICAL_GET ||
+		                op->type == LogicalOperatorType::LOGICAL_DUMMY_SCAN ||
+		                op->type == LogicalOperatorType::LOGICAL_EXPRESSION_GET ||
+		                op->type == LogicalOperatorType::LOGICAL_DELIM_GET ||
+		                op->type == LogicalOperatorType::LOGICAL_EMPTY_RESULT ||
+		                op->type == LogicalOperatorType::LOGICAL_CHUNK_GET);
+		if (is_leaf) {
+			auto *node = new PhysicalDAGNode(info->table_idx, info->table_op);
+			all_nodes.push_back(node);
+			node_map[info->table_idx] = node;
+			dfs_index[info->table_idx] = (int)all_nodes.size() - 1;
+			return;
+		}
 	}
 
 	// join node
