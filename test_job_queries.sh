@@ -11,6 +11,7 @@
 #   --limit N             Only run the first N queries (default: all)
 #   --no-jfp <target>     Disable DuckDB's join_filter_pushdown optimizer
 #                         target: rpt, baseline, or both
+#   --heuristic <name>    RPT heuristic: largest_root (default), join_order
 
 set -e
 
@@ -19,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DUCKDB="$SCRIPT_DIR/build/release/duckdb"
 DB="$SCRIPT_DIR/jobdata/job.duckdb"
 EXT="$SCRIPT_DIR/build/release/extension/rpt/rpt.duckdb_extension"
-QUERIES_DIR="$SCRIPT_DIR/jobdata/queries_updated"
+QUERIES_DIR="$SCRIPT_DIR/jobdata/queries"
 RESULTS_DIR="$SCRIPT_DIR/job_test_results"
 
 # Options
@@ -31,6 +32,7 @@ TIMING=false
 RUNS=1
 LIMIT=0
 NO_JFP=""  # "", "rpt", "baseline", or "both"
+HEURISTIC=""  # "", "largest_root", "join_order"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -67,6 +69,14 @@ while [[ $# -gt 0 ]]; do
             NO_JFP="$2"
             if [[ "$NO_JFP" != "rpt" && "$NO_JFP" != "baseline" && "$NO_JFP" != "both" ]]; then
                 echo "Error: --no-jfp must be 'rpt', 'baseline', or 'both'"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --heuristic)
+            HEURISTIC="$2"
+            if [[ "$HEURISTIC" != "largest_root" && "$HEURISTIC" != "join_order" ]]; then
+                echo "Error: --heuristic must be 'largest_root' or 'join_order'"
                 exit 1
             fi
             shift 2
@@ -120,6 +130,13 @@ jfp_prefix() {
     fi
 }
 
+# Build the SET rpt_heuristic prefix (only for RPT runs)
+heuristic_prefix() {
+    if [[ -n "$HEURISTIC" ]]; then
+        echo "SET rpt_heuristic = '$HEURISTIC';"
+    fi
+}
+
 # Run a query and capture output
 run_query() {
     local query="$1"
@@ -128,7 +145,8 @@ run_query() {
     local jfp=$(jfp_prefix "$with_extension")
 
     if [ "$with_extension" = "true" ]; then
-        "$DUCKDB" "$DB" -unsigned -noheader -list -c "LOAD '$EXT'; $jfp $query" 2>/dev/null > "$output_file" || true
+        local heur=$(heuristic_prefix)
+        "$DUCKDB" "$DB" -unsigned -noheader -list -c "LOAD '$EXT'; $heur $jfp $query" 2>/dev/null > "$output_file" || true
     else
         "$DUCKDB" "$DB" -unsigned -noheader -list -c "$jfp $query" 2>/dev/null > "$output_file" || true
     fi
@@ -146,10 +164,13 @@ run_query_timed() {
 
     local jfp=$(jfp_prefix "$with_extension")
 
+    local heur=$(heuristic_prefix)
+
     for ((r=1; r<=RUNS; r++)); do
         if [ "$with_extension" = "true" ]; then
             "$DUCKDB" "$DB" -unsigned -noheader -list -c "
 LOAD '$EXT';
+$heur
 $jfp
 PRAGMA enable_profiling='json';
 PRAGMA profiling_output='$prof_file';
