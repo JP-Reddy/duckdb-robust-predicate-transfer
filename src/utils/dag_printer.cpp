@@ -389,8 +389,15 @@ void PrintPhysicalDAG(vector<PhysicalDAGNode *> &all_nodes, TableManager &table_
 
 				if (pi < child->edges_to_parents.size()) {
 					auto &edge = child->edges_to_parents[pi];
-					string label = table_mgr.GetColumnName(edge.parent_table, edge.parent_col.column_index) + " / " +
-					               table_mgr.GetColumnName(edge.child_table, edge.child_col.column_index);
+					string label;
+					for (idx_t ci = 0; ci < edge.parent_cols.size(); ci++) {
+						if (ci > 0) {
+							label += ", ";
+						}
+						label += table_mgr.GetColumnName(edge.parent_table, edge.parent_cols[ci].column_index) +
+						         " / " +
+						         table_mgr.GetColumnName(edge.child_table, edge.child_cols[ci].column_index);
+					}
 					info.edge_labels.push_back(label);
 				}
 			}

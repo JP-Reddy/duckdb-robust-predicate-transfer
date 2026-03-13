@@ -650,9 +650,18 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RPTOpti
 				PhysicalDAGEdge edge;
 				edge.parent_table = parent_idx;
 				edge.child_table = best_child;
-				edge.parent_col = parent_col;
-				edge.child_col = best_child_col;
+				edge.parent_cols.push_back(parent_col);
+				edge.child_cols.push_back(best_child_col);
 				child_node->edges_to_parents.push_back(edge);
+			} else {
+				// multi-column join: append columns to existing edge
+				for (auto &edge : child_node->edges_to_parents) {
+					if (edge.parent_table == parent_idx) {
+						edge.parent_cols.push_back(parent_col);
+						edge.child_cols.push_back(best_child_col);
+						break;
+					}
+				}
 			}
 		}
 		return;
@@ -883,6 +892,123 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 			use_op.is_create = false;
 			use_op.sequence_number = sequence++;
 			backward_bf_ops[child_node->table_op].push_back(use_op);
+		}
+	}
+
+	return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
+}
+
+std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
+          unordered_map<LogicalOperator *, vector<BloomFilterOperation>>>
+RPTOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDAGNode *> &all_nodes) {
+	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops;
+	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> backward_bf_ops;
+
+	if (all_nodes.empty()) {
+		return {std::move(forward_bf_ops), std::move(backward_bf_ops)};
+	}
+
+	// group nodes by level
+	unordered_map<int, vector<PhysicalDAGNode *>> nodes_by_level;
+	int max_level = 0;
+	for (auto *node : all_nodes) {
+		nodes_by_level[node->level].push_back(node);
+		max_level = std::max(max_level, node->level);
+	}
+
+	idx_t sequence = 0;
+
+	// Printer::Print(StringUtil::Format("[DAG-GEN] %zu nodes, max_level=%d", all_nodes.size(), max_level));
+	// for (auto *node : all_nodes) {
+	// 	Printer::Print(StringUtil::Format("[DAG-GEN]   table_%llu (level=%d, parents=%zu, children=%zu, card=%llu)",
+	// 	                                  (unsigned long long)node->table_idx, node->level, node->parents.size(),
+	// 	                                  node->children.size(),
+	// 	                                  (unsigned long long)node->table_op->estimated_cardinality));
+	// 	for (idx_t ei = 0; ei < node->edges_to_parents.size(); ei++) {
+	// 		auto &e = node->edges_to_parents[ei];
+	// 		for (idx_t ci = 0; ci < e.parent_cols.size(); ci++) {
+	// 			Printer::Print(StringUtil::Format(
+	// 			    "[DAG-GEN]     edge[%llu] parent=%llu col(%llu.%llu) <- child=%llu col(%llu.%llu)",
+	// 			    (unsigned long long)ei, (unsigned long long)e.parent_table,
+	// 			    (unsigned long long)e.parent_cols[ci].table_index,
+	// 			    (unsigned long long)e.parent_cols[ci].column_index, (unsigned long long)e.child_table,
+	// 			    (unsigned long long)e.child_cols[ci].table_index,
+	// 			    (unsigned long long)e.child_cols[ci].column_index));
+	// 		}
+	// 	}
+	// }
+
+	// forward pass: bottom-up (leaves to roots), levels max_level down to 1
+	for (int level = max_level; level >= 1; level--) {
+		for (auto *child_node : nodes_by_level[level]) {
+			for (idx_t ei = 0; ei < child_node->edges_to_parents.size(); ei++) {
+				auto &edge = child_node->edges_to_parents[ei];
+				auto *parent_node = child_node->parents[ei];
+
+				// CREATE_BF on child (build=child, probe=parent)
+				BloomFilterOperation create_op;
+				create_op.build_table_idx = child_node->table_idx;
+				create_op.probe_table_idx = parent_node->table_idx;
+				create_op.build_columns = edge.child_cols;
+				create_op.probe_columns = edge.parent_cols;
+				create_op.is_create = true;
+				create_op.is_forward_pass = true;
+				create_op.sequence_number = sequence++;
+				forward_bf_ops[child_node->table_op].push_back(create_op);
+
+				// USE_BF on parent
+				BloomFilterOperation use_op;
+				use_op.build_table_idx = child_node->table_idx;
+				use_op.probe_table_idx = parent_node->table_idx;
+				use_op.build_columns = edge.child_cols;
+				use_op.probe_columns = edge.parent_cols;
+				use_op.is_create = false;
+				use_op.is_forward_pass = true;
+				use_op.sequence_number = sequence++;
+				forward_bf_ops[parent_node->table_op].push_back(use_op);
+			}
+		}
+	}
+
+	// backward pass: top-down (roots to leaves), levels 1 to max_level
+	for (int level = 1; level <= max_level; level++) {
+		for (auto *child_node : nodes_by_level[level]) {
+			// collect parent edges with their indices, sort by parent cardinality ascending
+			vector<idx_t> edge_indices;
+			for (idx_t ei = 0; ei < child_node->edges_to_parents.size(); ei++) {
+				edge_indices.push_back(ei);
+			}
+			std::sort(edge_indices.begin(), edge_indices.end(), [&](idx_t a, idx_t b) {
+				return child_node->parents[a]->table_op->estimated_cardinality <
+				       child_node->parents[b]->table_op->estimated_cardinality;
+			});
+
+			for (auto ei : edge_indices) {
+				auto &edge = child_node->edges_to_parents[ei];
+				auto *parent_node = child_node->parents[ei];
+
+				// CREATE_BF on parent (build=parent, probe=child)
+				BloomFilterOperation create_op;
+				create_op.build_table_idx = parent_node->table_idx;
+				create_op.probe_table_idx = child_node->table_idx;
+				create_op.build_columns = edge.parent_cols;
+				create_op.probe_columns = edge.child_cols;
+				create_op.is_create = true;
+				create_op.is_forward_pass = false;
+				create_op.sequence_number = sequence++;
+				backward_bf_ops[parent_node->table_op].push_back(create_op);
+
+				// USE_BF on child
+				BloomFilterOperation use_op;
+				use_op.build_table_idx = parent_node->table_idx;
+				use_op.probe_table_idx = child_node->table_idx;
+				use_op.build_columns = edge.parent_cols;
+				use_op.probe_columns = edge.child_cols;
+				use_op.is_create = false;
+				use_op.is_forward_pass = false;
+				use_op.sequence_number = sequence++;
+				backward_bf_ops[child_node->table_op].push_back(use_op);
+			}
 		}
 	}
 
@@ -1239,13 +1365,35 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	// display physical plan DAG if enabled (before we modify the plan)
 	PrintPhysicalPlanDAG(plan.get());
 
-	// step 2: create transfer graph using LargestRoot algorithm
-	mst_edges = LargestRoot(edges);
+	// determine heuristic
+	Value heuristic_val;
+	string heuristic = "largest_root";
+	if (context.TryGetCurrentSetting("rpt_heuristic", heuristic_val)) {
+		heuristic = heuristic_val.GetValue<string>();
+	}
 
-	// step 3: generate forward/backward pass using MST edges
-	const auto bf_ops = GenerateStageModifications(mst_edges);
-	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops = bf_ops.first;
-	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> backward_bf_ops = bf_ops.second;
+	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops, backward_bf_ops;
+
+	if (heuristic == "join_order") {
+		// use DuckDB's join order DAG)
+		auto all_nodes = BuildPhysicalPlanDAG(plan.get());
+
+		// display DAG if setting is enabled
+		Value dag_val;
+		if (context.TryGetCurrentSetting("rpt_display_dag", dag_val) && dag_val.GetValue<bool>()) {
+			PrintPhysicalDAG(all_nodes, table_mgr);
+		}
+
+		auto bf_ops = GenerateStageModificationsFromDAG(all_nodes);
+		forward_bf_ops = std::move(bf_ops.first);
+		backward_bf_ops = std::move(bf_ops.second);
+	} else {
+		// default: largest_root
+		mst_edges = LargestRoot(edges);
+		auto bf_ops = GenerateStageModifications(mst_edges);
+		forward_bf_ops = std::move(bf_ops.first);
+		backward_bf_ops = std::move(bf_ops.second);
+	}
 
 	// check pass mode setting
 	Value pass_mode_val;

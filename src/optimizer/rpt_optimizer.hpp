@@ -28,8 +28,8 @@ struct TreeNode {
 struct PhysicalDAGEdge {
 	idx_t parent_table;
 	idx_t child_table;
-	ColumnBinding parent_col;
-	ColumnBinding child_col;
+	vector<ColumnBinding> parent_cols;
+	vector<ColumnBinding> child_cols;
 };
 
 // node in physical plan DAG (supports multiple parents for multi-way joins)
@@ -89,6 +89,10 @@ public:
 	std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
 	          unordered_map<LogicalOperator *, vector<BloomFilterOperation>>>
 	GenerateStageModifications(const vector<JoinEdge> &mst_edges);
+
+	std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
+	          unordered_map<LogicalOperator *, vector<BloomFilterOperation>>>
+	GenerateStageModificationsFromDAG(vector<PhysicalDAGNode *> &all_nodes);
 
 	unique_ptr<LogicalOperator> BuildStackedBFOperators(unique_ptr<LogicalOperator> base_plan,
 	                                                    const vector<BloomFilterOperation> &bf_ops,

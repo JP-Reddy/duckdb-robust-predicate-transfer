@@ -63,6 +63,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("rpt_filter_type", "Filter type for scan pushdown: all, bf_only, minmax_only",
 	                          LogicalType::VARCHAR, Value("all"));
 	config.AddExtensionOption("rpt_pass_mode", "Pass mode: both, forward_only", LogicalType::VARCHAR, Value("both"));
+	config.AddExtensionOption("rpt_heuristic", "Heuristic for BF transfer: largest_root, join_order",
+	                          LogicalType::VARCHAR, Value("largest_root"));
 }
 
 void RptExtension::Load(ExtensionLoader &loader) {
