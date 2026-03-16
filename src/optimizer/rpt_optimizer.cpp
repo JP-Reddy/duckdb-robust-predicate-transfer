@@ -714,6 +714,106 @@ vector<PhysicalDAGNode *> RPTOptimizerContextState::BuildPhysicalPlanDAG(Logical
 	return all_nodes;
 }
 
+void RPTOptimizerContextState::FlipRootsToLeaves(vector<PhysicalDAGNode *> &all_nodes) {
+	// step 1: find all roots
+	vector<PhysicalDAGNode *> roots;
+	for (auto *node : all_nodes) {
+		if (node->parents.empty()) {
+			roots.push_back(node);
+		}
+	}
+	if (roots.size() <= 1) {
+		return;
+	}
+
+	// step 2: find anchor root (largest cardinality)
+	PhysicalDAGNode *anchor = roots[0];
+	for (auto *r : roots) {
+		if (r->table_op->estimated_cardinality > anchor->table_op->estimated_cardinality) {
+			anchor = r;
+		}
+	}
+
+	// step 3: reverse edges for non-anchor roots
+	for (auto *root : roots) {
+		if (root == anchor) {
+			continue;
+		}
+
+		// reverse each edge to root's children
+		// iterate over a copy since we modify the vectors
+		auto children_copy = root->children;
+		auto edges_copy = root->edges_to_parents; // edges_to_parents is empty for roots, edges are on children
+		for (auto *child : children_copy) {
+			// find and remove root from child's parents and get the edge
+			PhysicalDAGEdge edge;
+			bool found = false;
+			for (idx_t i = 0; i < child->parents.size(); i++) {
+				if (child->parents[i] == root) {
+					edge = child->edges_to_parents[i];
+					child->parents.erase(child->parents.begin() + i);
+					child->edges_to_parents.erase(child->edges_to_parents.begin() + i);
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				continue;
+			}
+
+			// remove child from root's children
+			for (idx_t i = 0; i < root->children.size(); i++) {
+				if (root->children[i] == child) {
+					root->children.erase(root->children.begin() + i);
+					break;
+				}
+			}
+
+			// reverse: child becomes parent of root
+			child->children.push_back(root);
+			root->parents.push_back(child);
+
+			// reverse the edge
+			PhysicalDAGEdge reversed;
+			reversed.parent_table = edge.child_table;
+			reversed.child_table = edge.parent_table;
+			reversed.parent_cols = edge.child_cols;
+			reversed.child_cols = edge.parent_cols;
+			root->edges_to_parents.push_back(reversed);
+		}
+	}
+
+	// step 4: recompute levels
+	for (auto *node : all_nodes) {
+		node->level = node->parents.empty() ? 0 : -1;
+	}
+	bool changed = true;
+	while (changed) {
+		changed = false;
+		for (auto *node : all_nodes) {
+			if (node->parents.empty()) {
+				continue;
+			}
+			int max_parent = -1;
+			bool all_set = true;
+			for (auto *p : node->parents) {
+				if (p->level < 0) {
+					all_set = false;
+					break;
+				}
+				max_parent = std::max(max_parent, p->level);
+			}
+			if (all_set && max_parent >= 0) {
+				int new_level = max_parent + 1;
+				if (new_level != node->level) {
+					node->level = new_level;
+					changed = true;
+				}
+			}
+		}
+	}
+}
+
 void RPTOptimizerContextState::PrintPhysicalPlanDAG(LogicalOperator *op) {
 	Value val;
 	if (!context.TryGetCurrentSetting("rpt_display_physical_dag", val) || !val.GetValue<bool>()) {
@@ -1375,8 +1475,18 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops, backward_bf_ops;
 
 	if (heuristic == "join_order") {
-		// use DuckDB's join order DAG)
+		// use DuckDB's join order DAG
 		auto all_nodes = BuildPhysicalPlanDAG(plan.get());
+
+		// flip non-largest roots to leaves (default: on)
+		Value flip_val;
+		bool flip_roots = true;
+		if (context.TryGetCurrentSetting("rpt_flip_roots", flip_val)) {
+			flip_roots = flip_val.GetValue<bool>();
+		}
+		if (flip_roots) {
+			FlipRootsToLeaves(all_nodes);
+		}
 
 		// display DAG if setting is enabled
 		Value dag_val;

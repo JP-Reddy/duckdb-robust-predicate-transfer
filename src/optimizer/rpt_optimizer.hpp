@@ -123,6 +123,9 @@ public:
 	vector<PhysicalDAGNode *> BuildPhysicalPlanDAG(LogicalOperator *op);
 	void PrintPhysicalPlanDAG(LogicalOperator *op);
 
+	// flip non-largest roots to leaves in the DAG
+	void FlipRootsToLeaves(vector<PhysicalDAGNode *> &all_nodes);
+
 	unique_ptr<LogicalOperator> PreOptimize(unique_ptr<LogicalOperator> plan);
 
 	unique_ptr<LogicalOperator> Optimize(unique_ptr<LogicalOperator> plan);

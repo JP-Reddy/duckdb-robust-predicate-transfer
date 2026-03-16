@@ -65,6 +65,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("rpt_pass_mode", "Pass mode: both, forward_only", LogicalType::VARCHAR, Value("both"));
 	config.AddExtensionOption("rpt_heuristic", "Heuristic for BF transfer: largest_root, join_order",
 	                          LogicalType::VARCHAR, Value("largest_root"));
+	config.AddExtensionOption("rpt_flip_roots", "Flip non-largest roots to leaves in join_order DAG",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
 }
 
 void RptExtension::Load(ExtensionLoader &loader) {
