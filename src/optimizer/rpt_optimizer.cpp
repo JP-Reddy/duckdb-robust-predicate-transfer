@@ -734,52 +734,49 @@ void RPTOptimizerContextState::FlipRootsToLeaves(vector<PhysicalDAGNode *> &all_
 		}
 	}
 
-	// step 3: reverse edges for non-anchor roots
-	for (auto *root : roots) {
-		if (root == anchor) {
-			continue;
-		}
-
-		// reverse each edge to root's children
-		// iterate over a copy since we modify the vectors
-		auto children_copy = root->children;
-		auto edges_copy = root->edges_to_parents; // edges_to_parents is empty for roots, edges are on children
-		for (auto *child : children_copy) {
-			// find and remove root from child's parents and get the edge
-			PhysicalDAGEdge edge;
-			bool found = false;
-			for (idx_t i = 0; i < child->parents.size(); i++) {
-				if (child->parents[i] == root) {
-					edge = child->edges_to_parents[i];
-					child->parents.erase(child->parents.begin() + i);
-					child->edges_to_parents.erase(child->edges_to_parents.begin() + i);
-					found = true;
-					break;
-				}
-			}
-			if (!found) {
+	// step 3: repeatedly flip non-anchor roots until only anchor remains
+	// flipping a root can expose new roots (e.g. flipping name reveals aka_name)
+	bool flipped = true;
+	while (flipped) {
+		flipped = false;
+		for (auto *node : all_nodes) {
+			if (!node->parents.empty() || node == anchor) {
 				continue;
 			}
-
-			// remove child from root's children
-			for (idx_t i = 0; i < root->children.size(); i++) {
-				if (root->children[i] == child) {
-					root->children.erase(root->children.begin() + i);
-					break;
+			// non-anchor root: reverse all edges to its children
+			auto children_copy = node->children;
+			for (auto *child : children_copy) {
+				PhysicalDAGEdge edge;
+				bool found = false;
+				for (idx_t i = 0; i < child->parents.size(); i++) {
+					if (child->parents[i] == node) {
+						edge = child->edges_to_parents[i];
+						child->parents.erase(child->parents.begin() + i);
+						child->edges_to_parents.erase(child->edges_to_parents.begin() + i);
+						found = true;
+						break;
+					}
 				}
+				if (!found) {
+					continue;
+				}
+				for (idx_t i = 0; i < node->children.size(); i++) {
+					if (node->children[i] == child) {
+						node->children.erase(node->children.begin() + i);
+						break;
+					}
+				}
+				child->children.push_back(node);
+				node->parents.push_back(child);
+
+				PhysicalDAGEdge reversed;
+				reversed.parent_table = edge.child_table;
+				reversed.child_table = edge.parent_table;
+				reversed.parent_cols = edge.child_cols;
+				reversed.child_cols = edge.parent_cols;
+				node->edges_to_parents.push_back(reversed);
 			}
-
-			// reverse: child becomes parent of root
-			child->children.push_back(root);
-			root->parents.push_back(child);
-
-			// reverse the edge
-			PhysicalDAGEdge reversed;
-			reversed.parent_table = edge.child_table;
-			reversed.child_table = edge.parent_table;
-			reversed.parent_cols = edge.child_cols;
-			reversed.child_cols = edge.parent_cols;
-			root->edges_to_parents.push_back(reversed);
+			flipped = true;
 		}
 	}
 
