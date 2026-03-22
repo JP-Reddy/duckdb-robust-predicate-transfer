@@ -1172,6 +1172,15 @@ RPTOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator> ba
 	// build operators from merged list
 	unique_ptr<LogicalOperator> current = std::move(base_plan);
 
+	// helper to set estimated_cardinality from the underlying scan table
+	auto set_cardinality = [&](LogicalOperator *op, const BloomFilterOperation &bf_op) {
+		idx_t table_idx = bf_op.is_create ? bf_op.build_table_idx : bf_op.probe_table_idx;
+		auto it = table_mgr.table_lookup.find(table_idx);
+		if (it != table_mgr.table_lookup.end()) {
+			op->estimated_cardinality = it->second.estimated_cardinality;
+		}
+	};
+
 	if (reverse_order) {
 		for (auto it = merged_ops.rbegin(); it != merged_ops.rend(); ++it) {
 			const auto &bf_op = *it;
@@ -1185,6 +1194,7 @@ RPTOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator> ba
 				new_op = make_uniq<LogicalUseBF>(bf_op);
 			}
 
+			set_cardinality(new_op.get(), bf_op);
 			new_op->AddChild(std::move(current));
 			current = std::move(new_op);
 		}
@@ -1200,6 +1210,7 @@ RPTOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator> ba
 				new_op = make_uniq<LogicalUseBF>(bf_op);
 			}
 
+			set_cardinality(new_op.get(), bf_op);
 			new_op->AddChild(std::move(current));
 			current = std::move(new_op);
 		}

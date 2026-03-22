@@ -324,8 +324,8 @@ static void PushDynamicFilters(const PhysicalCreateBF &op, const CreateBFGlobalS
 					auto bf_filter = make_uniq<BFTableFilter>(bf_it->second->GetNativeFilter(), false,
 					                                          target.column_name, target.column_type);
 					auto wrapped = make_uniq<SelectivityOptionalFilter>(std::move(bf_filter),
-					                                                    SelectivityOptionalFilter::BF_THRESHOLD,
-					                                                    SelectivityOptionalFilter::BF_CHECK_N);
+					                                                    1,
+					                                                    1000000);
 					target.dynamic_filters->PushFilter(op, target.scan_column_index, std::move(wrapped));
 					D_PRINTF("[PUSHDOWN] pushed BF for col %s to scan col %llu", target.column_name.c_str(),
 					         (unsigned long long)target.scan_column_index);
