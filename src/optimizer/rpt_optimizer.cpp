@@ -1451,6 +1451,60 @@ void RPTOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *plan)
 	}
 }
 
+// find the deepest CREATE_BF in a linear chain (following child[0])
+static LogicalOperator *FindDeepestCreateBF(LogicalOperator *node) {
+	LogicalOperator *deepest = nullptr;
+	while (node) {
+		if (node->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR && dynamic_cast<LogicalCreateBF *>(node)) {
+			deepest = node;
+		}
+		if (node->children.empty()) {
+			break;
+		}
+		node = node->children[0].get();
+	}
+	return deepest;
+}
+
+void RPTOptimizerContextState::LiftCreateBFAboveMarkJoin(unique_ptr<LogicalOperator> &plan) {
+	if (!plan) {
+		return;
+	}
+	for (auto &child : plan->children) {
+		LiftCreateBFAboveMarkJoin(child);
+	}
+
+	// match pattern: FILTER whose child is a MARK JOIN
+	if (plan->type != LogicalOperatorType::LOGICAL_FILTER) {
+		return;
+	}
+	if (plan->children.empty() || plan->children[0]->type != LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
+		return;
+	}
+	auto &join = plan->children[0]->Cast<LogicalComparisonJoin>();
+	if (join.join_type != JoinType::MARK) {
+		return;
+	}
+
+	// find the deepest CREATE_BF in the probe chain
+	auto &probe_child = plan->children[0]->children[0];
+	auto *deepest = FindDeepestCreateBF(probe_child.get());
+	if (!deepest) {
+		return;
+	}
+
+	// detach the block: probe_child → ... → deepest_CREATE_BF
+	// reconnect deepest_CREATE_BF's child as MARK_JOIN's new probe child
+	auto below_deepest = std::move(deepest->children[0]);
+	deepest->children.clear();
+	auto block = std::move(probe_child);
+	probe_child = std::move(below_deepest);
+
+	// attach FILTER (plan) under deepest_CREATE_BF, set plan = block
+	deepest->AddChild(std::move(plan));
+	plan = std::move(block);
+}
+
 unique_ptr<LogicalOperator> RPTOptimizerContextState::PreOptimize(unique_ptr<LogicalOperator> plan) {
 	// step 1: extract join operators
 	vector<JoinEdge> edges = ExtractOperators(*plan);
@@ -1525,6 +1579,10 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 
 	// step 4: insert create_bf/use_bf operators into the plan
 	plan = ApplyStageModifications(std::move(plan), forward_bf_ops, backward_bf_ops);
+
+	// step 4.5: lift CREATE_BF operators above MARK_JOIN + FILTER chains
+	// so bloom filters are built from post-IN-filter output
+	LiftCreateBFAboveMarkJoin(plan);
 
 	// step 5: link USE_BF operators to their corresponding CREATE_BF operators
 	LinkUseBFToCreateBF(plan.get());
