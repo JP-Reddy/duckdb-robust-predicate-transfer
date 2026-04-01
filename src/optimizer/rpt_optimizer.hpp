@@ -109,9 +109,11 @@ public:
 	// set up dynamic filter pushdown for forward-pass CREATE_BF operators
 	void SetupDynamicFilterPushdown(LogicalOperator *plan);
 
-	// lift CREATE_BF operators above MARK_JOIN + FILTER chains so bloom filters
-	// are built from the filtered output (e.g., post-IN evaluation)
+	// pass 1: lift BF operator block above MARK_JOIN (probe chain → above MARK_JOIN)
 	void LiftCreateBFAboveMarkJoin(unique_ptr<LogicalOperator> &plan);
+
+	// pass 2: lift BF operator block above FILTER (handles all FILTER cases)
+	void LiftCreateBFAboveFilter(unique_ptr<LogicalOperator> &plan);
 
 	// resolve column binding through rename chain to get base table binding
 	ColumnBinding ResolveColumnBinding(const ColumnBinding &binding) const;
