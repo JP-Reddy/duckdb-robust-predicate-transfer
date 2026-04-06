@@ -45,6 +45,9 @@ struct PhysicalDAGNode {
 	}
 };
 
+// column key for equivalence class union-find
+using ColKey = std::pair<idx_t, idx_t>; // (table_idx, column_idx)
+
 class RPTOptimizerContextState : public ClientContextState {
 public:
 	explicit RPTOptimizerContextState(ClientContext &ctx) : context(ctx) {
@@ -92,7 +95,7 @@ public:
 
 	std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
 	          unordered_map<LogicalOperator *, vector<BloomFilterOperation>>>
-	GenerateStageModificationsFromDAG(vector<PhysicalDAGNode *> &all_nodes);
+	GenerateStageModificationsFromDAG(vector<PhysicalDAGNode *> &all_nodes, map<ColKey, ColKey> &uf_parent);
 
 	unique_ptr<LogicalOperator> BuildStackedBFOperators(unique_ptr<LogicalOperator> base_plan,
 	                                                    const vector<BloomFilterOperation> &bf_ops,
@@ -126,7 +129,7 @@ public:
 	void PrintDAG(TreeNode *root);
 
 	// build and print DAG from DuckDB's join order (gated by rpt_display_physical_dag)
-	vector<PhysicalDAGNode *> BuildPhysicalPlanDAG(LogicalOperator *op);
+	vector<PhysicalDAGNode *> BuildPhysicalPlanDAG(LogicalOperator *op, map<ColKey, ColKey> &uf_parent);
 	void PrintPhysicalPlanDAG(LogicalOperator *op);
 
 	// flip non-largest roots to leaves in the DAG

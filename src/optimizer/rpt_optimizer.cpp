@@ -491,8 +491,6 @@ static void CollectBaseTableIndices(LogicalOperator *op, TableManager &table_mgr
 }
 
 // union-find helpers for column equivalence classes
-using ColKey = std::pair<idx_t, idx_t>; // (table_idx, column_idx)
-
 static ColKey UFFind(map<ColKey, ColKey> &parent, ColKey x) {
 	if (parent.find(x) == parent.end()) {
 		parent[x] = x;
@@ -673,11 +671,11 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RPTOpti
 	}
 }
 
-vector<PhysicalDAGNode *> RPTOptimizerContextState::BuildPhysicalPlanDAG(LogicalOperator *op) {
+vector<PhysicalDAGNode *> RPTOptimizerContextState::BuildPhysicalPlanDAG(LogicalOperator *op,
+                                                                        map<ColKey, ColKey> &uf_parent) {
 	vector<PhysicalDAGNode *> all_nodes;
 	map<idx_t, PhysicalDAGNode *> node_map;
 	map<idx_t, int> dfs_index;
-	map<ColKey, ColKey> uf_parent;
 
 	PhysicalDAGDFS(op, table_mgr, *this, all_nodes, node_map, dfs_index, uf_parent);
 
@@ -817,7 +815,8 @@ void RPTOptimizerContextState::PrintPhysicalPlanDAG(LogicalOperator *op) {
 		return;
 	}
 
-	auto all_nodes = BuildPhysicalPlanDAG(op);
+	map<ColKey, ColKey> uf_parent;
+	auto all_nodes = BuildPhysicalPlanDAG(op, uf_parent);
 	if (all_nodes.empty()) {
 		return;
 	}
@@ -997,7 +996,8 @@ RPTOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst
 
 std::pair<unordered_map<LogicalOperator *, vector<BloomFilterOperation>>,
           unordered_map<LogicalOperator *, vector<BloomFilterOperation>>>
-RPTOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDAGNode *> &all_nodes) {
+RPTOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDAGNode *> &all_nodes,
+                                                            map<ColKey, ColKey> &uf_parent) {
 	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> forward_bf_ops;
 	unordered_map<LogicalOperator *, vector<BloomFilterOperation>> backward_bf_ops;
 
@@ -1067,7 +1067,21 @@ RPTOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDAGNo
 		}
 	}
 
-	// backward pass: top-down (roots to leaves), levels 1 to max_level
+	// backward pass: top-down (roots to leaves) with broadcast optimization.
+	// for each equivalence class, build the BF once at the highest ancestor (root/bridge)
+	// and broadcast it to all descendants sharing that class.
+
+	// tracks which table created the BF for each equivalence class in the backward pass.
+	// key: equiv class root (from union-find)
+	// value: (build_table_op, index into backward_bf_ops[build_table_op], build_table_idx, build_columns)
+	struct EquivBFSource {
+		LogicalOperator *build_table_op;
+		idx_t create_op_index; // index into backward_bf_ops[build_table_op]
+		idx_t build_table_idx;
+		vector<ColumnBinding> build_columns;
+	};
+	map<ColKey, EquivBFSource> equiv_class_bf_source;
+
 	for (int level = 1; level <= max_level; level++) {
 		for (auto *child_node : nodes_by_level[level]) {
 			// collect parent edges with their indices, sort by parent cardinality ascending
@@ -1084,27 +1098,58 @@ RPTOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDAGNo
 				auto &edge = child_node->edges_to_parents[ei];
 				auto *parent_node = child_node->parents[ei];
 
-				// CREATE_BF on parent (build=parent, probe=child)
-				BloomFilterOperation create_op;
-				create_op.build_table_idx = parent_node->table_idx;
-				create_op.probe_table_idx = child_node->table_idx;
-				create_op.build_columns = edge.parent_cols;
-				create_op.probe_columns = edge.child_cols;
-				create_op.is_create = true;
-				create_op.is_forward_pass = false;
-				create_op.sequence_number = sequence++;
-				backward_bf_ops[parent_node->table_op].push_back(create_op);
+				// determine the equivalence class for this edge using the first column pair
+				ColKey parent_col_key = {edge.parent_cols[0].table_index, edge.parent_cols[0].column_index};
+				ColKey equiv_root = UFFind(uf_parent, parent_col_key);
 
-				// USE_BF on child
-				BloomFilterOperation use_op;
-				use_op.build_table_idx = parent_node->table_idx;
-				use_op.probe_table_idx = child_node->table_idx;
-				use_op.build_columns = edge.parent_cols;
-				use_op.probe_columns = edge.child_cols;
-				use_op.is_create = false;
-				use_op.is_forward_pass = false;
-				use_op.sequence_number = sequence++;
-				backward_bf_ops[child_node->table_op].push_back(use_op);
+				auto it = equiv_class_bf_source.find(equiv_root);
+				if (it != equiv_class_bf_source.end()) {
+					// an ancestor already created a BF for this equivalence class — broadcast (USE only)
+					auto &source = it->second;
+
+					// add child's probe columns to the existing CREATE_BF so linking can find it
+					auto &create_op = backward_bf_ops[source.build_table_op][source.create_op_index];
+					for (auto &col : edge.child_cols) {
+						create_op.probe_columns.push_back(col);
+					}
+
+					BloomFilterOperation use_op;
+					use_op.build_table_idx = source.build_table_idx;
+					use_op.probe_table_idx = child_node->table_idx;
+					use_op.build_columns = source.build_columns;
+					use_op.probe_columns = edge.child_cols;
+					use_op.is_create = false;
+					use_op.is_forward_pass = false;
+					use_op.sequence_number = sequence++;
+					backward_bf_ops[child_node->table_op].push_back(use_op);
+				} else {
+					// new equivalence class at this edge — create BF on parent, use on child
+					BloomFilterOperation create_op;
+					create_op.build_table_idx = parent_node->table_idx;
+					create_op.probe_table_idx = child_node->table_idx;
+					create_op.build_columns = edge.parent_cols;
+					create_op.probe_columns = edge.child_cols;
+					create_op.is_create = true;
+					create_op.is_forward_pass = false;
+					create_op.sequence_number = sequence++;
+
+					idx_t create_idx = backward_bf_ops[parent_node->table_op].size();
+					backward_bf_ops[parent_node->table_op].push_back(create_op);
+
+					BloomFilterOperation use_op;
+					use_op.build_table_idx = parent_node->table_idx;
+					use_op.probe_table_idx = child_node->table_idx;
+					use_op.build_columns = edge.parent_cols;
+					use_op.probe_columns = edge.child_cols;
+					use_op.is_create = false;
+					use_op.is_forward_pass = false;
+					use_op.sequence_number = sequence++;
+					backward_bf_ops[child_node->table_op].push_back(use_op);
+
+					// record this as the source for this equivalence class
+					equiv_class_bf_source[equiv_root] = {parent_node->table_op, create_idx,
+					                                     parent_node->table_idx, edge.parent_cols};
+				}
 			}
 		}
 	}
@@ -1559,7 +1604,8 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 
 	if (heuristic == "join_order") {
 		// use DuckDB's join order DAG
-		auto all_nodes = BuildPhysicalPlanDAG(plan.get());
+		map<ColKey, ColKey> uf_parent;
+		auto all_nodes = BuildPhysicalPlanDAG(plan.get(), uf_parent);
 
 		// flip non-largest roots to leaves (default: on)
 		Value flip_val;
@@ -1577,7 +1623,7 @@ unique_ptr<LogicalOperator> RPTOptimizerContextState::Optimize(unique_ptr<Logica
 			PrintPhysicalDAG(all_nodes, table_mgr);
 		}
 
-		auto bf_ops = GenerateStageModificationsFromDAG(all_nodes);
+		auto bf_ops = GenerateStageModificationsFromDAG(all_nodes, uf_parent);
 		forward_bf_ops = std::move(bf_ops.first);
 		backward_bf_ops = std::move(bf_ops.second);
 	} else {
