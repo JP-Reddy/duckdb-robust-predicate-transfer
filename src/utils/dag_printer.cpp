@@ -463,16 +463,14 @@ void PrintPhysicalDAG(vector<PhysicalDAGNode *> &all_nodes, TableManager &table_
 			output.push_back(branch);
 		}
 
-		// edge labels
-		string label_line(conn_width, ' ');
-		bool has_labels = false;
 		for (auto &info : conns) {
 			for (idx_t i = 0; i < info.edge_labels.size(); i++) {
 				string &lbl = info.edge_labels[i];
 				if (lbl.empty()) {
 					continue;
 				}
-				int center = info.parent_centers[i];
+				string label_line(conn_width, ' ');
+				int center = info.child_center;
 				int start = center - (int)lbl.size() / 2;
 				if (start < 0) {
 					start = 0;
@@ -480,11 +478,8 @@ void PrintPhysicalDAG(vector<PhysicalDAGNode *> &all_nodes, TableManager &table_
 				for (idx_t j = 0; j < lbl.size() && start + (int)j < conn_width; j++) {
 					label_line[start + j] = lbl[j];
 				}
-				has_labels = true;
+				output.push_back(label_line);
 			}
-		}
-		if (has_labels) {
-			output.push_back(label_line);
 		}
 
 		// vertical lines to children
