@@ -1107,10 +1107,14 @@ RPTOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDAGNo
 					// an ancestor already created a BF for this equivalence class — broadcast (USE only)
 					auto &source = it->second;
 
-					// add child's probe columns to the existing CREATE_BF so linking can find it
+					// add child's probe columns (and matching build columns) to the existing
+					// CREATE_BF so linking can find it and the merge logic preserves them
 					auto &create_op = backward_bf_ops[source.build_table_op][source.create_op_index];
-					for (auto &col : edge.child_cols) {
-						create_op.probe_columns.push_back(col);
+					for (idx_t ci = 0; ci < edge.child_cols.size(); ci++) {
+						create_op.probe_columns.push_back(edge.child_cols[ci]);
+						create_op.build_columns.push_back(source.build_columns[ci < source.build_columns.size()
+						                                                            ? ci
+						                                                            : source.build_columns.size() - 1]);
 					}
 
 					BloomFilterOperation use_op;
