@@ -379,7 +379,33 @@ SinkFinalizeType PhysicalCreateBF::Finalize(Pipeline &pipeline, Event &event, Cl
 	D_PRINTF("[FINALIZE] CREATE_BF (build=%s): total_data contains %llu rows, %zu bloom filters", build_table.c_str(),
 	         (unsigned long long)gsink.total_data->Count(), bloom_filter_map.size());
 
-	// 2. mark bloom filters as finalized
+	// 2. resize any undersized BFs and rehash from materialized data.
+	// rule: resize iff allocated_bits / actual_rows < 8  (i.e., <8 bits/key -> FPR > ~2%).
+	// shrink-on-overestimate is intentionally skipped.
+	// TODO - evaluate memory savings and performance tradeoff with shrink-on-overestimate
+	const idx_t actual_rows = gsink.total_data->Count();
+	if (actual_rows > 0) {
+		for (size_t i = 0; i < bf_operation->build_columns.size(); i++) {
+			const auto &col = bf_operation->build_columns[i];
+			auto it = bloom_filter_map.find(col);
+			if (it == bloom_filter_map.end() || !it->second) {
+				continue;
+			}
+			auto &bf = *it->second;
+			const idx_t min_bits = std::max<idx_t>(512, bf.SizedForRows() * 12);
+			const idx_t allocated_bits = NextPowerOfTwo(min_bits);
+			if (actual_rows * 8 > allocated_bits) {
+				D_PRINTF("[RESIZE] CREATE_BF (build=%s) col=(%llu.%llu) sized_for=%llu actual=%llu "
+				         "allocated_bits=%llu -> rehashing",
+				         build_table.c_str(), (unsigned long long)col.table_index,
+				         (unsigned long long)col.column_index, (unsigned long long)bf.SizedForRows(),
+				         (unsigned long long)actual_rows, (unsigned long long)allocated_bits);
+				bf.ReinitializeAndRehash(context, actual_rows, *gsink.total_data, {bound_column_indices[i]});
+			}
+		}
+	}
+
+	// 3. mark bloom filters as finalized
 	for (auto &entry : bloom_filter_map) {
 		if (entry.second) {
 			entry.second->finalized_ = true;
