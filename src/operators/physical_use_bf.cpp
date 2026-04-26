@@ -160,7 +160,7 @@ OperatorResultType PhysicalUseBF::ExecuteInternal(ExecutionContext &context, Dat
 		// }
 
 		// lookup directly into selection vector
-		result_count = bf->LookupSel(input, sel, bound_column_indices, bf_state.bit_vector.data());
+		result_count = bf->LookupSel(input, sel, {bound_column_indices[i]}, bf_state.bit_vector.data());
 
 		// early exit if no rows passed
 		if (result_count == 0) {
