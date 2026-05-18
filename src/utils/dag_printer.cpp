@@ -64,8 +64,9 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 				child_cols = edge->join_columns_a;
 			}
 			for (idx_t i = 0; i < parent_cols.size(); i++) {
-				if (i > 0)
+				if (i > 0) {
 					label += ", ";
+}
 				label += table_mgr.GetColumnName(node->table_idx, parent_cols[i].column_index);
 				label += " / ";
 				label += table_mgr.GetColumnName(child->table_idx, child_cols[i].column_index);
@@ -105,10 +106,12 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 		}
 		if (label_start < 0) {
 			int shift = -label_start;
-			for (auto &c : child_offsets)
+			for (auto &c : child_offsets) {
 				c += shift;
-			for (auto &c : child_centers)
+}
+			for (auto &c : child_centers) {
 				c += shift;
+}
 			total_width += shift;
 		}
 	}
@@ -119,10 +122,12 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 	int parent_offset = children_mid - parent_width / 2;
 	if (parent_offset < 0) {
 		int shift = -parent_offset;
-		for (auto &c : child_offsets)
+		for (auto &c : child_offsets) {
 			c += shift;
-		for (auto &c : child_centers)
+}
+		for (auto &c : child_centers) {
 			c += shift;
+}
 		total_width += shift;
 		parent_offset = 0;
 	}
@@ -146,15 +151,17 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 	if (child_blocks.size() == 1) {
 		int cc = child_centers[0];
 		string conn_line(total_width, ' ');
-		if (cc >= 0 && cc < total_width)
+		if (cc >= 0 && cc < total_width) {
 			conn_line[cc] = '|';
+}
 		result.lines.push_back(conn_line);
 
 		if (!edge_labels[0].empty()) {
 			string label_line(total_width, ' ');
 			int label_start = cc - (int)edge_labels[0].size() / 2;
-			if (label_start < 0)
+			if (label_start < 0) {
 				label_start = 0;
+}
 			for (idx_t j = 0; j < edge_labels[0].size() && label_start + (int)j < total_width; j++) {
 				label_line[label_start + j] = edge_labels[0][j];
 			}
@@ -162,8 +169,9 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 		}
 
 		string conn_line2(total_width, ' ');
-		if (cc >= 0 && cc < total_width)
+		if (cc >= 0 && cc < total_width) {
 			conn_line2[cc] = '|';
+}
 		result.lines.push_back(conn_line2);
 	} else {
 		// horizontal branch line
@@ -175,8 +183,9 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 			branch_line[c] = '-';
 		}
 		for (auto cc : child_centers) {
-			if (cc >= 0 && cc < total_width)
+			if (cc >= 0 && cc < total_width) {
 				branch_line[cc] = '+';
+}
 		}
 		if (parent_center >= 0 && parent_center < total_width) {
 			branch_line[parent_center] = '+';
@@ -186,11 +195,13 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 		// edge labels row
 		string label_line(total_width, ' ');
 		for (idx_t i = 0; i < child_centers.size(); i++) {
-			if (edge_labels[i].empty())
+			if (edge_labels[i].empty()) {
 				continue;
+}
 			int label_start = child_centers[i] - (int)edge_labels[i].size() / 2;
-			if (label_start < 0)
+			if (label_start < 0) {
 				label_start = 0;
+}
 			for (idx_t j = 0; j < edge_labels[i].size() && label_start + (int)j < total_width; j++) {
 				label_line[label_start + j] = edge_labels[i][j];
 			}
@@ -200,8 +211,9 @@ static RenderedBlock RenderSubtree(TreeNode *node, TableManager &table_mgr) {
 		// vertical connectors to children
 		string vert_line(total_width, ' ');
 		for (auto cc : child_centers) {
-			if (cc >= 0 && cc < total_width)
+			if (cc >= 0 && cc < total_width) {
 				vert_line[cc] = '|';
+}
 		}
 		result.lines.push_back(vert_line);
 	}

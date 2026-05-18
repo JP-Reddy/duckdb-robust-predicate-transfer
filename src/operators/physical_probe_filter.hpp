@@ -33,7 +33,7 @@ public:
 	                    vector<LogicalType> types, idx_t estimated_cardinality, vector<idx_t> bound_column_indices);
 
 	// required virtual methods
-	virtual ~PhysicalProbeFilter() = default;
+	~PhysicalProbeFilter() override = default;
 
 	string GetName() const override;
 	string ToString(ExplainFormat format = ExplainFormat::DEFAULT) const override;

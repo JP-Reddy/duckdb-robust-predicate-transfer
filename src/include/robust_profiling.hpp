@@ -152,12 +152,14 @@ public:
 				string pass = s->is_forward_pass ? "FWD" : "BWD";
 				string probe_names;
 				for (size_t pi = 0; pi < s->probe_table_indices.size(); pi++) {
-					if (pi > 0)
+					if (pi > 0) {
 						probe_names += ",";
+}
 					probe_names += GetName(s->probe_table_indices[pi]);
 				}
-				if (probe_names.empty())
+				if (probe_names.empty()) {
 					probe_names = "?";
+}
 				Printer::PrintF(
 				    "CREATE_FILTER [%s]: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
 				    pass.c_str(), GetName(s->build_table_idx).c_str(), probe_names.c_str(),
