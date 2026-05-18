@@ -752,8 +752,8 @@ void RobustOptimizerContextState::FlipRootsToLeaves(vector<PhysicalDAGNode *> &a
 				for (idx_t i = 0; i < child->parents.size(); i++) {
 					if (child->parents[i] == node) {
 						edge = child->edges_to_parents[i];
-						child->parents.erase(child->parents.begin() + i);
-						child->edges_to_parents.erase(child->edges_to_parents.begin() + i);
+						child->parents.erase(child->parents.begin() + static_cast<std::ptrdiff_t>(i));
+						child->edges_to_parents.erase(child->edges_to_parents.begin() + static_cast<std::ptrdiff_t>(i));
 						found = true;
 						break;
 					}
@@ -763,7 +763,7 @@ void RobustOptimizerContextState::FlipRootsToLeaves(vector<PhysicalDAGNode *> &a
 				}
 				for (idx_t i = 0; i < node->children.size(); i++) {
 					if (node->children[i] == child) {
-						node->children.erase(node->children.begin() + i);
+						node->children.erase(node->children.begin() + static_cast<std::ptrdiff_t>(i));
 						break;
 					}
 				}
@@ -830,6 +830,7 @@ std::pair<unordered_map<LogicalOperator *, vector<FilterOperation>>,
           unordered_map<LogicalOperator *, vector<FilterOperation>>>
 RobustOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
 	// step 1: build rooted tree from MST
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): BuildRootedTree stores non-const JoinEdge* internally for adjacency-list layout; does not mutate elements.
 	TreeNode *root = BuildRootedTree(const_cast<vector<JoinEdge> &>(mst_edges));
 
 	// check if tree building failed

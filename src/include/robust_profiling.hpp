@@ -122,7 +122,7 @@ public:
 
 	void PrintSummary() {
 		Printer::Print("\n=== Robust PROFILING ===");
-		Printer::PrintF("Optimizer: %lld us", (long long)optimizer_time_us);
+		Printer::PrintF("Optimizer: %lld us", (int64_t)optimizer_time_us);
 
 		// build a combined list sorted by sequence_number
 		struct StatsEntry {
@@ -163,8 +163,8 @@ public:
 				Printer::PrintF(
 				    "CREATE_FILTER [%s]: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
 				    pass.c_str(), GetName(s->build_table_idx).c_str(), probe_names.c_str(),
-				    (unsigned long long)s->rows_materialized.load(), (long long)s->sink_time_us.load(),
-				    (long long)s->finalize_time_us.load(), (long long)s->source_time_us.load());
+				    (uint64_t)s->rows_materialized.load(), (int64_t)s->sink_time_us.load(),
+				    (int64_t)s->finalize_time_us.load(), (int64_t)s->source_time_us.load());
 				total_sink_us += s->sink_time_us.load();
 				total_source_us += s->source_time_us.load();
 				total_finalize_us += s->finalize_time_us.load();
@@ -173,33 +173,33 @@ public:
 				string pass = s->is_forward_pass ? "FWD" : "BWD";
 				idx_t ri = s->rows_in.load();
 				idx_t ro = s->rows_out.load();
-				double sel = ri > 0 ? 100.0 * (double)ro / ri : 0.0;
+				double sel = ri > 0 ? 100.0 * static_cast<double>(ro) / static_cast<double>(ri) : 0.0;
 				Printer::PrintF(
 				    "PROBE_FILTER    [%s]: [build=%s, probe=%s] in=%llu, out=%llu, sel=%.1f%%, probe=%lldus",
 				    pass.c_str(), GetName(s->build_table_idx).c_str(), GetName(s->probe_table_idx).c_str(),
-				    (unsigned long long)ri, (unsigned long long)ro, sel, (long long)s->probe_time_us.load());
+				    (uint64_t)ri, (uint64_t)ro, sel, (int64_t)s->probe_time_us.load());
 				if (s->is_forward_pass) {
-					fwd_rows_in += ri;
-					fwd_rows_out += ro;
+					fwd_rows_in += static_cast<int64_t>(ri);
+					fwd_rows_out += static_cast<int64_t>(ro);
 					fwd_probe_us += s->probe_time_us.load();
 				} else {
-					bwd_rows_in += ri;
-					bwd_rows_out += ro;
+					bwd_rows_in += static_cast<int64_t>(ri);
+					bwd_rows_out += static_cast<int64_t>(ro);
 					bwd_probe_us += s->probe_time_us.load();
 				}
 			}
 		}
 
 		Printer::Print("\nTotals:");
-		Printer::PrintF("  sink: %lld us", (long long)total_sink_us);
-		Printer::PrintF("  source: %lld us", (long long)total_source_us);
-		Printer::PrintF("  finalize (BF build): %lld us", (long long)total_finalize_us);
+		Printer::PrintF("  sink: %lld us", (int64_t)total_sink_us);
+		Printer::PrintF("  source: %lld us", (int64_t)total_source_us);
+		Printer::PrintF("  finalize (BF build): %lld us", (int64_t)total_finalize_us);
 
 		auto print_pass_stats = [](const char *label, int64_t rows_in, int64_t rows_out, int64_t probe_us) {
 			if (rows_in > 0) {
-				double filtered_pct = 100.0 * (1.0 - (double)rows_out / rows_in);
+				double filtered_pct = 100.0 * (1.0 - static_cast<double>(rows_out) / static_cast<double>(rows_in));
 				Printer::PrintF("  %s probe: %lld us, filtered: %lld / %lld rows (%.1f%% removed)", label,
-				                (long long)probe_us, (long long)(rows_in - rows_out), (long long)rows_in, filtered_pct);
+				                (int64_t)probe_us, (int64_t)(rows_in - rows_out), (int64_t)rows_in, filtered_pct);
 			}
 		};
 
@@ -209,10 +209,10 @@ public:
 		int64_t total_rows_in = fwd_rows_in + bwd_rows_in;
 		int64_t total_rows_out = fwd_rows_out + bwd_rows_out;
 		if (total_rows_in > 0) {
-			double filtered_pct = 100.0 * (1.0 - (double)total_rows_out / total_rows_in);
+			double filtered_pct = 100.0 * (1.0 - static_cast<double>(total_rows_out) / static_cast<double>(total_rows_in));
 			Printer::PrintF("  total probe: %lld us, filtered: %lld / %lld rows (%.1f%% removed)",
-			                (long long)(fwd_probe_us + bwd_probe_us), (long long)(total_rows_in - total_rows_out),
-			                (long long)total_rows_in, filtered_pct);
+			                (int64_t)(fwd_probe_us + bwd_probe_us), (int64_t)(total_rows_in - total_rows_out),
+			                (int64_t)total_rows_in, filtered_pct);
 		}
 		Printer::Print("=== END Robust PROFILING ===\n");
 	}
