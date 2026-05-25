@@ -1,7 +1,7 @@
 #!/bin/bash
-# test_job_queries.sh - Test all JOB queries with and without RPT extension
-# 
-# Usage: ./test_job_queries.sh [options]
+# test_job_queries.sh - Test all JOB queries with and without the Robust extension
+#
+# Usage: ./scripts/test_job_queries.sh [options]
 #   --generate-baseline    Generate baseline results only (no comparison)
 #   --test-only           Run tests against existing baseline (skip baseline generation)
 #   --query <name>        Test a specific query (e.g., --query 1a)
@@ -10,18 +10,19 @@
 #   --runs N              Run each query N times and take the minimum (default: 1)
 #   --limit N             Only run the first N queries (default: all)
 #   --no-jfp <target>     Disable DuckDB's join_filter_pushdown optimizer
-#                         target: rpt, baseline, or both
-#   --heuristic <name>    RPT heuristic: largest_root (default), join_order
+#                         target: robust, baseline, or both
+#   --heuristic <name>    Robust heuristic: join_order (default), largest_root
 
 set -e
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DUCKDB="$SCRIPT_DIR/build/release/duckdb"
-DB="$SCRIPT_DIR/jobdata/job.duckdb"
-EXT="$SCRIPT_DIR/build/release/extension/rpt/rpt.duckdb_extension"
-QUERIES_DIR="$SCRIPT_DIR/jobdata/queries"
-RESULTS_DIR="$SCRIPT_DIR/job_test_results"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DUCKDB="$PROJECT_ROOT/build/release/duckdb"
+DB="$PROJECT_ROOT/jobdata/job.duckdb"
+EXT="$PROJECT_ROOT/build/release/extension/robust/robust.duckdb_extension"
+QUERIES_DIR="$PROJECT_ROOT/jobdata/queries"
+RESULTS_DIR="$PROJECT_ROOT/job_test_results"
 
 # Options
 GENERATE_BASELINE=false
@@ -31,8 +32,8 @@ VERBOSE=false
 TIMING=false
 RUNS=1
 LIMIT=0
-NO_JFP=""  # "", "rpt", "baseline", or "both"
-HEURISTIC=""  # "", "largest_root", "join_order"
+NO_JFP=""  # "", "robust", "baseline", or "both"
+HEURISTIC=""  # "", "join_order", "largest_root"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -67,8 +68,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-jfp)
             NO_JFP="$2"
-            if [[ "$NO_JFP" != "rpt" && "$NO_JFP" != "baseline" && "$NO_JFP" != "both" ]]; then
-                echo "Error: --no-jfp must be 'rpt', 'baseline', or 'both'"
+            if [[ "$NO_JFP" != "robust" && "$NO_JFP" != "baseline" && "$NO_JFP" != "both" ]]; then
+                echo "Error: --no-jfp must be 'robust', 'baseline', or 'both'"
                 exit 1
             fi
             shift 2
@@ -109,7 +110,7 @@ check_prerequisites() {
     fi
 
     if [ ! -f "$EXT" ]; then
-        echo -e "${RED}Error: RPT extension not found at $EXT${NC}"
+        echo -e "${RED}Error: Robust extension not found at $EXT${NC}"
         echo "Run 'GEN=ninja make release' first"
         exit 1
     fi
@@ -120,20 +121,20 @@ check_prerequisites() {
     fi
 }
 
-# Build the disable-JFP prefix for a given mode ("true" = rpt, "false" = baseline)
+# Build the disable-JFP prefix for a given mode ("true" = robust, "false" = baseline)
 jfp_prefix() {
     local with_extension="$1"
     if [[ "$NO_JFP" = "both" ]] || \
-       [[ "$NO_JFP" = "rpt" && "$with_extension" = "true" ]] || \
+       [[ "$NO_JFP" = "robust" && "$with_extension" = "true" ]] || \
        [[ "$NO_JFP" = "baseline" && "$with_extension" = "false" ]]; then
         echo "SET disabled_optimizers = 'join_filter_pushdown';"
     fi
 }
 
-# Build the SET rpt_heuristic prefix (only for RPT runs)
+# Build the SET robust_heuristic prefix (only for Robust runs)
 heuristic_prefix() {
     if [[ -n "$HEURISTIC" ]]; then
-        echo "SET rpt_heuristic = '$HEURISTIC';"
+        echo "SET robust_heuristic = '$HEURISTIC';"
     fi
 }
 
@@ -206,22 +207,22 @@ except:
 generate_baseline() {
     echo "=== Generating Baseline Results ==="
     mkdir -p "$RESULTS_DIR/baseline"
-    
+
     local count=0
     local total=$(ls -1 "$QUERIES_DIR"/*.sql 2>/dev/null | wc -l | tr -d ' ')
-    
+
     for query_file in "$QUERIES_DIR"/*.sql; do
         local query_name=$(basename "$query_file" .sql)
         ((count++))
-        
+
         echo -n "[$count/$total] Generating baseline for $query_name... "
-        
+
         local query=$(cat "$query_file")
         run_query "$query" "false" "$RESULTS_DIR/baseline/$query_name.txt"
-        
+
         echo -e "${GREEN}done${NC}"
     done
-    
+
     echo ""
     echo "Baseline results saved to $RESULTS_DIR/baseline/"
 }
@@ -230,55 +231,54 @@ generate_baseline() {
 test_query() {
     local query_name="$1"
     local query_file="$QUERIES_DIR/$query_name.sql"
-    
+
     if [ ! -f "$query_file" ]; then
         echo -e "${RED}Query file not found: $query_file${NC}"
         return 1
     fi
-    
+
     local query=$(cat "$query_file")
     local baseline_file="$RESULTS_DIR/baseline/$query_name.txt"
-    local rpt_file="$RESULTS_DIR/rpt/$query_name.txt"
-    
-    mkdir -p "$RESULTS_DIR/rpt"
-    
+    local robust_file="$RESULTS_DIR/robust/$query_name.txt"
+
+    mkdir -p "$RESULTS_DIR/robust"
     mkdir -p "$RESULTS_DIR/baseline"
 
     if [ "$TIMING" = "true" ]; then
         local baseline_time=$(run_query_timed "$query" "false" "$baseline_file")
-        local rpt_time=$(run_query_timed "$query" "true" "$rpt_file")
+        local robust_time=$(run_query_timed "$query" "true" "$robust_file")
     else
         run_query "$query" "false" "$baseline_file"
-        run_query "$query" "true" "$rpt_file"
+        run_query "$query" "true" "$robust_file"
     fi
-    
+
     # Compare results
-    if diff -q "$baseline_file" "$rpt_file" > /dev/null 2>&1; then
+    if diff -q "$baseline_file" "$robust_file" > /dev/null 2>&1; then
         if [ "$TIMING" = "true" ]; then
-            local speedup=$(echo "scale=2; $baseline_time / $rpt_time" | bc 2>/dev/null || echo "N/A")
+            local speedup=$(echo "scale=2; $baseline_time / $robust_time" | bc 2>/dev/null || echo "N/A")
             if [ "$RUNS" -gt 1 ]; then
-                echo -e "${GREEN}✅ PASS${NC} (baseline: ${baseline_time}s [min of $RUNS], rpt: ${rpt_time}s [min of $RUNS], speedup: ${speedup}x)"
+                echo -e "${GREEN}✅ PASS${NC} (baseline: ${baseline_time}s [min of $RUNS], robust: ${robust_time}s [min of $RUNS], speedup: ${speedup}x)"
             else
-                echo -e "${GREEN}✅ PASS${NC} (baseline: ${baseline_time}s, rpt: ${rpt_time}s, speedup: ${speedup}x)"
+                echo -e "${GREEN}✅ PASS${NC} (baseline: ${baseline_time}s, robust: ${robust_time}s, speedup: ${speedup}x)"
             fi
 
             # accumulate log-speedup for geometric mean
-            local log_sp=$(python3 -c "import math; print(math.log($baseline_time / $rpt_time))" 2>/dev/null || echo "0")
+            local log_sp=$(python3 -c "import math; print(math.log($baseline_time / $robust_time))" 2>/dev/null || echo "0")
             LOG_SUM_SPEEDUP=$(python3 -c "print($LOG_SUM_SPEEDUP + $log_sp)")
             ((TIMED_QUERY_COUNT++))
 
             # track faster/slower counts (use 5% threshold to avoid noise)
-            local is_faster=$(echo "$baseline_time > $rpt_time * 1.05" | bc 2>/dev/null || echo "0")
-            local is_slower=$(echo "$rpt_time > $baseline_time * 1.05" | bc 2>/dev/null || echo "0")
+            local is_faster=$(echo "$baseline_time > $robust_time * 1.05" | bc 2>/dev/null || echo "0")
+            local is_slower=$(echo "$robust_time > $baseline_time * 1.05" | bc 2>/dev/null || echo "0")
 
             if [ "$is_faster" = "1" ]; then
-                ((RPT_FASTER++))
+                ((ROBUST_FASTER++))
                 FASTER_QUERIES="$FASTER_QUERIES $query_name"
             elif [ "$is_slower" = "1" ]; then
-                ((RPT_SLOWER++))
+                ((ROBUST_SLOWER++))
                 SLOWER_QUERIES="$SLOWER_QUERIES $query_name"
             else
-                ((RPT_SAME++))
+                ((ROBUST_SAME++))
             fi
         else
             echo -e "${GREEN}✅ PASS${NC}"
@@ -286,23 +286,23 @@ test_query() {
         return 0
     else
         echo -e "${RED}❌ FAIL${NC}"
-        
+
         if [ "$VERBOSE" = "true" ]; then
             echo "  Expected (first 10 lines):"
             head -10 "$baseline_file" | sed 's/^/    /'
             echo "  Got (first 10 lines):"
-            head -10 "$rpt_file" | sed 's/^/    /'
+            head -10 "$robust_file" | sed 's/^/    /'
             echo "  Diff:"
-            diff "$baseline_file" "$rpt_file" | head -20 | sed 's/^/    /'
+            diff "$baseline_file" "$robust_file" | head -20 | sed 's/^/    /'
         fi
         return 1
     fi
 }
 
-# Global timing counters (for tracking RPT performance)
-RPT_FASTER=0
-RPT_SLOWER=0
-RPT_SAME=0
+# Global timing counters (for tracking Robust performance)
+ROBUST_FASTER=0
+ROBUST_SLOWER=0
+ROBUST_SAME=0
 FASTER_QUERIES=""
 SLOWER_QUERIES=""
 LOG_SUM_SPEEDUP="0"
@@ -312,24 +312,24 @@ TIMED_QUERY_COUNT=0
 test_all_queries() {
     echo "=== Testing All JOB Queries ==="
     echo ""
-    
-    mkdir -p "$RESULTS_DIR/rpt"
-    
+
+    mkdir -p "$RESULTS_DIR/robust"
+
     local passed=0
     local failed=0
     local failed_queries=""
     local count=0
     local total=$(ls -1 "$QUERIES_DIR"/*.sql 2>/dev/null | wc -l | tr -d ' ')
-    
+
     # Reset timing counters
-    RPT_FASTER=0
-    RPT_SLOWER=0
-    RPT_SAME=0
+    ROBUST_FASTER=0
+    ROBUST_SLOWER=0
+    ROBUST_SAME=0
     FASTER_QUERIES=""
     SLOWER_QUERIES=""
     LOG_SUM_SPEEDUP="0"
     TIMED_QUERY_COUNT=0
-    
+
     # Sort queries naturally (1a, 1b, 1c, 2a, ... not 1a, 10a, 11a, ...)
     for query_file in $(ls -1 "$QUERIES_DIR"/*.sql | sort -V); do
         local query_name=$(basename "$query_file" .sql)
@@ -340,7 +340,7 @@ test_all_queries() {
         fi
 
         echo -n "[$count/$total] Testing $query_name... "
-        
+
         if test_query "$query_name"; then
             ((passed++))
         else
@@ -348,7 +348,7 @@ test_all_queries() {
             failed_queries="$failed_queries $query_name"
         fi
     done
-    
+
     # Summary
     echo ""
     echo "=========================================="
@@ -356,7 +356,7 @@ test_all_queries() {
     echo "=========================================="
     echo -e "Passed: ${GREEN}$passed${NC} / $total"
     echo -e "Failed: ${RED}$failed${NC} / $total"
-    
+
     if [ -n "$failed_queries" ]; then
         echo ""
         echo -e "${RED}Failed queries:${NC}"
@@ -365,18 +365,18 @@ test_all_queries() {
         done
         echo ""
         echo "Run with --verbose to see details, or test individual queries:"
-        echo "  ./test_job_queries.sh --query <name> --verbose"
+        echo "  ./scripts/test_job_queries.sh --query <name> --verbose"
     fi
-    
+
     # Timing summary (only when --timing is enabled)
     if [ "$TIMING" = "true" ]; then
         echo ""
         echo "=========================================="
         echo "           TIMING SUMMARY"
         echo "=========================================="
-        echo -e "RPT Faster: ${GREEN}$RPT_FASTER${NC} queries"
-        echo -e "RPT Slower: ${RED}$RPT_SLOWER${NC} queries"
-        echo -e "RPT Same:   $RPT_SAME queries"
+        echo -e "Robust Faster: ${GREEN}$ROBUST_FASTER${NC} queries"
+        echo -e "Robust Slower: ${RED}$ROBUST_SLOWER${NC} queries"
+        echo -e "Robust Same:   $ROBUST_SAME queries"
 
         if [ "$TIMED_QUERY_COUNT" -gt 0 ]; then
             local geo_mean=$(python3 -c "import math; print(f'{math.exp($LOG_SUM_SPEEDUP / $TIMED_QUERY_COUNT):.3f}')")
@@ -386,7 +386,7 @@ test_all_queries() {
 
         if [ -n "$FASTER_QUERIES" ]; then
             echo ""
-            echo -e "${GREEN}Queries where RPT was faster:${NC}"
+            echo -e "${GREEN}Queries where Robust was faster:${NC}"
             for q in $FASTER_QUERIES; do
                 echo "  - $q"
             done
@@ -394,13 +394,13 @@ test_all_queries() {
 
         if [ -n "$SLOWER_QUERIES" ]; then
             echo ""
-            echo -e "${RED}Queries where RPT was slower:${NC}"
+            echo -e "${RED}Queries where Robust was slower:${NC}"
             for q in $SLOWER_QUERIES; do
                 echo "  - $q"
             done
         fi
     fi
-    
+
     # Save summary to file
     {
         echo "Test run: $(date)"
@@ -410,9 +410,9 @@ test_all_queries() {
         if [ "$TIMING" = "true" ]; then
             echo ""
             echo "Timing Summary:"
-            echo "RPT Faster: $RPT_FASTER queries"
-            echo "RPT Slower: $RPT_SLOWER queries"
-            echo "RPT Same: $RPT_SAME queries"
+            echo "Robust Faster: $ROBUST_FASTER queries"
+            echo "Robust Slower: $ROBUST_SLOWER queries"
+            echo "Robust Same: $ROBUST_SAME queries"
             echo "Faster queries:$FASTER_QUERIES"
             echo "Slower queries:$SLOWER_QUERIES"
             if [ "$TIMED_QUERY_COUNT" -gt 0 ]; then
@@ -421,7 +421,7 @@ test_all_queries() {
             fi
         fi
     } > "$RESULTS_DIR/summary.txt"
-    
+
     if [ $failed -gt 0 ]; then
         return 1
     fi
@@ -430,12 +430,12 @@ test_all_queries() {
 
 # Main
 main() {
-    echo "JOB Query Test Suite for RPT Extension"
-    echo "======================================="
+    echo "JOB Query Test Suite for Robust Extension"
+    echo "========================================="
     echo ""
-    
+
     check_prerequisites
-    
+
     if [ -n "$SPECIFIC_QUERY" ]; then
         echo "Testing query: $SPECIFIC_QUERY"
         echo ""
@@ -459,4 +459,3 @@ main() {
 }
 
 main "$@"
-

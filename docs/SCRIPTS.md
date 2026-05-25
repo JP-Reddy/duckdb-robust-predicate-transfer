@@ -108,7 +108,7 @@ Runs `bench_job.sh` across recent git commits. Checks out each commit, rebuilds,
 | `--reverse` | Run newest to oldest |
 
 ### bench_compare.sh
-Compares JOB performance between current and previous commit. Builds both, runs `test_job_queries.sh --timing` 3 times each, reports average geometric mean speedup.
+Compares JOB performance between current and previous commit. Builds both, runs `scripts/test_job_queries.sh --timing` 3 times each, reports average geometric mean speedup.
 
 ```
 ./bench_compare.sh
@@ -136,15 +136,15 @@ Requires: `BUILD_BENCHMARK=1 GEN=ninja make release`
 
 ## Testing
 
-### test_job_queries.sh
+### scripts/test_job_queries.sh
 Tests all JOB queries for correctness (baseline vs RPT result comparison) with optional timing and speedup reporting.
 
 ```
-./test_job_queries.sh                           # test all queries
-./test_job_queries.sh --timing --runs 3         # with timing, min of 3
-./test_job_queries.sh --query 1a --verbose      # single query, verbose
-./test_job_queries.sh --generate-baseline       # regenerate baselines
-./test_job_queries.sh --no-jfp both --limit 10  # disable JFP, first 10
+./scripts/test_job_queries.sh                           # test all queries
+./scripts/test_job_queries.sh --timing --runs 3         # with timing, min of 3
+./scripts/test_job_queries.sh --query 1a --verbose      # single query, verbose
+./scripts/test_job_queries.sh --generate-baseline       # regenerate baselines
+./scripts/test_job_queries.sh --no-jfp both --limit 10  # disable JFP, first 10
 ```
 
 | Flag | Description |

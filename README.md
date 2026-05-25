@@ -113,14 +113,23 @@ ls jobdata/queries/1a.sql    # 113 queries
 
 ### Correctness + wall-clock comparison
 
-`./test_job_queries.sh` runs every JOB query with and without the extension, diffs results, and reports per-query timing + geomean speedup.
+`./scripts/test_job_queries.sh` runs every JOB query with and without the extension, diffs results, and reports per-query timing + geomean speedup.
+
+**Recommended invocation:**
 
 ```bash
-./test_job_queries.sh                          # correctness only
-./test_job_queries.sh --timing                 # single run
-./test_job_queries.sh --timing --runs 3        # min of 3 runs (more stable)
-./test_job_queries.sh --query 7c --timing      # one query
-./test_job_queries.sh --timing --limit 10      # first N queries
+./scripts/test_job_queries.sh --heuristic join_order --timing --runs 5
+```
+
+For each of the 113 JOB queries it runs the query 5 times against the baseline (DuckDB stock optimizer) and 5 times with the Robust extension loaded, takes the minimum wall-clock from each side to suppress timer noise and cold-cache jitter, diffs the two result sets to confirm correctness, and prints per-query speedup plus a geometric mean across all queries. Output is also persisted to `job_test_results/summary.txt`.
+
+Other useful forms:
+
+```bash
+./scripts/test_job_queries.sh                          # correctness only, no timing
+./scripts/test_job_queries.sh --timing                 # single run per side
+./scripts/test_job_queries.sh --query 7c --timing      # one query
+./scripts/test_job_queries.sh --timing --limit 10      # first N queries
 ```
 
 Summary written to `job_test_results/summary.txt`.
