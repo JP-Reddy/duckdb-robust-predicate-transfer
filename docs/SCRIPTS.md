@@ -108,20 +108,20 @@ Runs `bench_job.sh` across recent git commits. Checks out each commit, rebuilds,
 | `--reverse` | Run newest to oldest |
 
 ### bench_compare.sh
-Compares JOB performance between current and previous commit. Builds both, runs `scripts/test_job_queries.sh --timing` 3 times each, reports average geometric mean speedup.
+Compares JOB performance between current and previous commit. Builds both, runs `scripts/test_job.sh --timing` 3 times each, reports average geometric mean speedup.
 
 ```
 ./bench_compare.sh
 ```
 
-### run_bench_compare.sh
+### bench_job.sh
 Runs DuckDB's built-in benchmark runner for baseline and RPT benchmark suites, then compares results side-by-side with speedup calculations.
 
 ```
-./run_bench_compare.sh                       # all queries
-./run_bench_compare.sh --pattern "03.*"      # specific pattern
-./run_bench_compare.sh --rpt-only            # RPT benchmarks only
-./run_bench_compare.sh --no-run              # compare existing results
+./bench_job.sh                       # all queries
+./bench_job.sh --pattern "03.*"      # specific pattern
+./bench_job.sh --rpt-only            # RPT benchmarks only
+./bench_job.sh --no-run              # compare existing results
 ```
 
 | Flag | Description |
@@ -136,15 +136,15 @@ Requires: `BUILD_BENCHMARK=1 GEN=ninja make release`
 
 ## Testing
 
-### scripts/test_job_queries.sh
+### scripts/test_job.sh
 Tests all JOB queries for correctness (baseline vs RPT result comparison) with optional timing and speedup reporting.
 
 ```
-./scripts/test_job_queries.sh                           # test all queries
-./scripts/test_job_queries.sh --timing --runs 3         # with timing, min of 3
-./scripts/test_job_queries.sh --query 1a --verbose      # single query, verbose
-./scripts/test_job_queries.sh --generate-baseline       # regenerate baselines
-./scripts/test_job_queries.sh --no-jfp both --limit 10  # disable JFP, first 10
+./scripts/test_job.sh                           # test all queries
+./scripts/test_job.sh --timing --runs 3         # with timing, min of 3
+./scripts/test_job.sh --query 1a --verbose      # single query, verbose
+./scripts/test_job.sh --generate-baseline       # regenerate baselines
+./scripts/test_job.sh --no-jfp both --limit 10  # disable JFP, first 10
 ```
 
 | Flag | Description |

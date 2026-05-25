@@ -1,7 +1,7 @@
 #!/bin/bash
-# run_bench_compare.sh - Run baseline and Robust benchmarks, report side-by-side comparison
+# bench_job.sh - Run baseline and Robust JOB benchmarks via DuckDB's benchmark_runner, report side-by-side comparison
 #
-# Usage: ./run_bench_compare.sh [options]
+# Usage: ./scripts/bench_job.sh [options]
 #   --pattern <pat>   Query name pattern, e.g. "03.*" (default: .* = all)
 #   --baseline-only   Run only baseline benchmarks
 #   --robust-only        Run only Robust benchmarks

@@ -1,7 +1,7 @@
 #!/bin/bash
-# test_job_queries.sh - Test all JOB queries with and without the Robust extension
+# test_job.sh - Test all JOB queries with and without the Robust extension
 #
-# Usage: ./scripts/test_job_queries.sh [options]
+# Usage: ./scripts/test_job.sh [options]
 #   --generate-baseline    Generate baseline results only (no comparison)
 #   --test-only           Run tests against existing baseline (skip baseline generation)
 #   --query <name>        Test a specific query (e.g., --query 1a)
@@ -365,7 +365,7 @@ test_all_queries() {
         done
         echo ""
         echo "Run with --verbose to see details, or test individual queries:"
-        echo "  ./scripts/test_job_queries.sh --query <name> --verbose"
+        echo "  ./scripts/test_job.sh --query <name> --verbose"
     fi
 
     # Timing summary (only when --timing is enabled)

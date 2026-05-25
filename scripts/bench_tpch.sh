@@ -1,5 +1,5 @@
 #!/bin/bash
-# run_bench_compare_tpch.sh - Run baseline and Robust TPCH benchmarks, report side-by-side comparison.
+# bench_tpch.sh - Run baseline and Robust TPCH benchmarks via DuckDB's benchmark_runner, report side-by-side comparison.
 #
 # Suites used:
 #   benchmark/tpch_baseline/  (baseline, no extension)
@@ -11,7 +11,7 @@
 # have only one join (Robust's edges<=1 early-exit), Q04/Q15/Q16/Q22 currently insert no BFs,
 # and Q05/Q09/Q20 have cyclic join graphs that crash or miscompare under Robust.
 #
-# Usage: ./run_bench_compare_tpch.sh [options]
+# Usage: ./scripts/bench_tpch.sh [options]
 #   --pattern <pat>    Query name pattern, e.g. "q03" (default: all wired queries)
 #   --baseline-only    Run only baseline benchmarks
 #   --robust-only         Run only Robust benchmarks

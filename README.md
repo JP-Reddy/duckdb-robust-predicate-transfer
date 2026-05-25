@@ -61,7 +61,7 @@ GEN=ninja make release
 # debug (AddressSanitizer enabled)
 GEN=ninja make debug
 
-# release + benchmark runner (needed for run_bench_compare.sh)
+# release + benchmark runner (needed for bench_job.sh)
 BUILD_BENCHMARK=1 GEN=ninja make release
 ```
 
@@ -111,14 +111,23 @@ ls jobdata/job.duckdb
 ls jobdata/queries/1a.sql    # 113 queries
 ```
 
+### When to use which script
+
+Two complementary tools live in `scripts/`:
+
+- **`test_job.sh`** — *correctness-first dev loop tool.* Wraps the `duckdb` CLI, loads the extension dynamically with `LOAD`, diffs baseline vs Robust output to catch correctness regressions, and reports per-query wall-clock + geomean speedup. Use this on every PR / dev iteration. No special build flag needed; just a plain release build.
+- **`bench_job.sh`** — *authoritative measurement tool.* Wraps DuckDB's in-tree `benchmark_runner` (build with `BUILD_BENCHMARK=1`), runs all queries in a single process for lower measurement noise, and explicitly skips the cold first run. Use this for numbers that go into the README, a paper, or PR perf claims. No correctness check — pair with `test_job.sh` if you've changed the optimizer.
+
+The TPC-H counterpart of `bench_job.sh` is `bench_tpch.sh` (only the 9 queries where Robust currently inserts BFs and runs correctly).
+
 ### Correctness + wall-clock comparison
 
-`./scripts/test_job_queries.sh` runs every JOB query with and without the extension, diffs results, and reports per-query timing + geomean speedup.
+`./scripts/test_job.sh` runs every JOB query with and without the extension, diffs results, and reports per-query timing + geomean speedup.
 
 **Recommended invocation:**
 
 ```bash
-./scripts/test_job_queries.sh --heuristic join_order --timing --runs 5
+./scripts/test_job.sh --heuristic join_order --timing --runs 5
 ```
 
 For each of the 113 JOB queries it runs the query 5 times against the baseline (DuckDB stock optimizer) and 5 times with the Robust extension loaded, takes the minimum wall-clock from each side to suppress timer noise and cold-cache jitter, diffs the two result sets to confirm correctness, and prints per-query speedup plus a geometric mean across all queries. Output is also persisted to `job_test_results/summary.txt`.
@@ -126,36 +135,36 @@ For each of the 113 JOB queries it runs the query 5 times against the baseline (
 Other useful forms:
 
 ```bash
-./scripts/test_job_queries.sh                          # correctness only, no timing
-./scripts/test_job_queries.sh --timing                 # single run per side
-./scripts/test_job_queries.sh --query 7c --timing      # one query
-./scripts/test_job_queries.sh --timing --limit 10      # first N queries
+./scripts/test_job.sh                          # correctness only, no timing
+./scripts/test_job.sh --timing                 # single run per side
+./scripts/test_job.sh --query 7c --timing      # one query
+./scripts/test_job.sh --timing --limit 10      # first N queries
 ```
 
 Summary written to `job_test_results/summary.txt`.
 
 ### DuckDB benchmark-runner suites
 
-`scripts/run_bench_compare.sh` drives the in-tree DuckDB benchmark runner against the `imdb` (baseline) and `imdb_robust*` (extension) suites and writes a side-by-side comparison.
+`scripts/bench_job.sh` drives the in-tree DuckDB benchmark runner against the `imdb` (baseline) and `imdb_robust*` (extension) suites and writes a side-by-side comparison.
 
 ```bash
 # all 113 queries, baseline + Robust, min of repeated runs
-./scripts/run_bench_compare.sh
+./scripts/bench_job.sh
 
 # subset
-./scripts/run_bench_compare.sh --pattern '07.*'
+./scripts/bench_job.sh --pattern '07.*'
 
 # Robust with the largest_root heuristic (vs baseline)
-./scripts/run_bench_compare.sh --heuristic largest_root
+./scripts/bench_job.sh --heuristic largest_root
 
 # Robust forward-only (no backward equivalence-class broadcast)
-./scripts/run_bench_compare.sh --forward-only
+./scripts/bench_job.sh --forward-only
 
 # re-aggregate already-collected raw results without re-running
-./scripts/run_bench_compare.sh --no-run
+./scripts/bench_job.sh --no-run
 
 # run Robust suite first (default is baseline first; flips the order to control thermals)
-./scripts/run_bench_compare.sh --robust-first
+./scripts/bench_job.sh --robust-first
 ```
 
 Output: `benchmark_results/{baseline_raw.tsv, robust_raw.tsv, comparison.tsv}`.
