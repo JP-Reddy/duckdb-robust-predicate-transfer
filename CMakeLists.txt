@@ -12,9 +12,7 @@ set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
 project(${TARGET_NAME})
-include_directories(src/include)
-#add_subdirectory(src/operators)
-#include_directories(src)
+include_directories(src)
 
 set(EXTENSION_SOURCES
     src/robust_extension.cpp
@@ -49,8 +47,8 @@ if(BUILD_BLOOM_FILTER_BENCHMARK)
         src/bloom_filter.cpp
     )
     target_include_directories(bloom_filter_benchmark PRIVATE
-        src/include
-        ${CMAKE_SOURCE_DIR}/src/include
+        src
+        ${CMAKE_SOURCE_DIR}/src
     )
     target_link_libraries(bloom_filter_benchmark duckdb)
 endif()

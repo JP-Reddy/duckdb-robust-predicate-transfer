@@ -2,7 +2,7 @@
 #include "bloom_filter.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parallel/pipeline.hpp"
-#include "debug_utils.hpp"
+#include "utils/debug_utils.hpp"
 #include "robust_profiling.hpp"
 #include "probe_empty_registry.hpp"
 #include <duckdb/parallel/meta_pipeline.hpp>

@@ -1,7 +1,7 @@
 #include "table_manager.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "debug_utils.hpp"
+#include "utils/debug_utils.hpp"
 
 namespace duckdb {
 

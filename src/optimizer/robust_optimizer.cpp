@@ -13,7 +13,7 @@
 #include "duckdb/common/unordered_map.hpp"
 #include "../operators/logical_create_filter.hpp"
 #include "../operators/logical_probe_filter.hpp"
-#include "debug_utils.hpp"
+#include "utils/debug_utils.hpp"
 #include "robust_profiling.hpp"
 #include "../utils/dag_printer.hpp"
 #include <chrono>

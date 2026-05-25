@@ -4,7 +4,7 @@
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/parallel/meta_pipeline.hpp"
-#include "debug_utils.hpp"
+#include "utils/debug_utils.hpp"
 #include "robust_profiling.hpp"
 #include "probe_empty_registry.hpp"
 

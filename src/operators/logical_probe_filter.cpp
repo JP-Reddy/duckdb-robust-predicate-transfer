@@ -1,6 +1,6 @@
 #include "logical_probe_filter.hpp"
 #include "physical_probe_filter.hpp"
-#include "debug_utils.hpp"
+#include "utils/debug_utils.hpp"
 
 namespace duckdb {
 
