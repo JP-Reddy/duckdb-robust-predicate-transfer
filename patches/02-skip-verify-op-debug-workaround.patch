@@ -1,0 +1,13 @@
+diff --git a/src/optimizer/column_lifetime_analyzer.cpp b/src/optimizer/column_lifetime_analyzer.cpp
+index e31e9b4451..26048450a9 100644
+--- a/src/optimizer/column_lifetime_analyzer.cpp
++++ b/src/optimizer/column_lifetime_analyzer.cpp
+@@ -56,7 +56,7 @@ void ColumnLifetimeAnalyzer::ExtractColumnBindings(const Expression &expr, vecto
+ }
+ 
+ void ColumnLifetimeAnalyzer::VisitOperator(LogicalOperator &op) {
+-	Verify(op);
++	// Verify(op);
+ 	if (TopN::CanOptimize(op) && op.children[0]->type == LogicalOperatorType::LOGICAL_ORDER_BY) {
+ 		// Let's not mess with this, TopN is more important than projection maps
+ 		// TopN does not support a projection map like Order does

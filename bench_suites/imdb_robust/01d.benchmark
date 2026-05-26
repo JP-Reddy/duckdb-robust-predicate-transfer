@@ -1,0 +1,3 @@
+template benchmark/imdb_robust/imdb_robust.benchmark.in
+QUERY_NUMBER=01d
+QUERY_NUMBER_PADDED=01d

@@ -169,6 +169,15 @@ Summary written to `job_test_results/summary.txt`.
 
 Output: `benchmark_results/{baseline_raw.tsv, robust_raw.tsv, comparison.tsv}`.
 
+### How the benchmark harness is wired
+
+`bench_job.sh` and `bench_tpch.sh` invoke DuckDB's in-tree `benchmark_runner` against suites that need to live inside the DuckDB submodule (`duckdb/benchmark/imdb_robust*`, `duckdb/benchmark/tpch_*`). Those suites — plus two small upstream patches needed to load an unsigned dev extension and to work around a debug-build issue (see `wip_docs/features/13-debug-build-verify-op-failure.md`) — are kept inside this repo at:
+
+- `bench_suites/` — vendored suites (source-of-truth, tracked here)
+- `patches/` — duckdb-submodule patches (tracked here)
+
+`make release` and `make debug` automatically run `scripts/vendor_duckdb_bench.sh`, which copies the suites into `duckdb/benchmark/` and applies the patches. Re-running is idempotent. If a patch fails to apply (typically because the DuckDB submodule was bumped and upstream rewrote the patched region), the build aborts with a clear error.
+
 ### Per-query profiling
 
 `scripts/profile_query.sh` runs a single query under both baseline and Robust, captures DuckDB's JSON profile, and prints a breakdown by operator class (HASH_JOIN, SEQ_SCAN, CREATE_FILTER, PROBE_FILTER, ...).

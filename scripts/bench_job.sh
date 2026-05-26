@@ -64,14 +64,14 @@ run_baseline() {
 run_robust() {
     if [ "$RUN_ROBUST" = true ]; then
         if [ "$HEURISTIC" = "largest_root" ]; then
-            ROBUST_SUITE="imdb_robust"
+            ROBUST_SUITE="imdb_robust_lr"
             echo "Running Robust largest_root benchmarks (pattern: $PATTERN)..."
         elif [ "$FORWARD_ONLY" = true ]; then
             ROBUST_SUITE="imdb_robust_fwd"
             echo "Running Robust forward-only benchmarks (pattern: $PATTERN)..."
         else
-            ROBUST_SUITE="imdb_robust_jo"
-            echo "Running Robust join_order benchmarks (pattern: $PATTERN)..."
+            ROBUST_SUITE="imdb_robust"
+            echo "Running Robust default (join_order) benchmarks (pattern: $PATTERN)..."
         fi
         "$RUNNER" "benchmark/${ROBUST_SUITE}/$PATTERN" 2>&1 | tee "$ROBUST_RAW"
         echo "Robust done."

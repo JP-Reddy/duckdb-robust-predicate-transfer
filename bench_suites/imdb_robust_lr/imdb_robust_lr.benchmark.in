@@ -1,0 +1,15 @@
+# name: ${FILE_PATH}
+# description: JOB query ${QUERY_NUMBER_PADDED} with Robust extension (largest_root heuristic)
+# group: [imdb_robust_lr]
+
+name Q${QUERY_NUMBER_PADDED}_Robust_LR
+group imdb_robust_lr
+
+cache imdb.duckdb
+
+init
+LOAD 'build/release/extension/robust/robust.duckdb_extension';
+SET disabled_optimizers = 'join_filter_pushdown';
+SET robust_heuristic = 'largest_root';
+
+run benchmark/imdb_plan_cost/queries/${QUERY_NUMBER_PADDED}.sql

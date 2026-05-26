@@ -1,0 +1,15 @@
+# name: ${FILE_PATH}
+# description: JOB query ${QUERY_NUMBER_PADDED} with Robust extension (forward only)
+# group: [imdb_robust_fwd]
+
+name Q${QUERY_NUMBER_PADDED}_Robust_FWD
+group imdb_robust_fwd
+
+cache imdb.duckdb
+
+init
+LOAD 'build/release/extension/robust/robust.duckdb_extension';
+SET disabled_optimizers = 'join_filter_pushdown';
+SET robust_pass_mode = 'forward_only';
+
+run benchmark/imdb_plan_cost/queries/${QUERY_NUMBER_PADDED}.sql

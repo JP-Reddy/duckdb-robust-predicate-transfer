@@ -1,0 +1,15 @@
+# name: ${FILE_PATH}
+# description: JOB query ${QUERY_NUMBER_PADDED} with Robust extension (default heuristic: join_order)
+# group: [imdb_robust]
+
+name Q${QUERY_NUMBER_PADDED}_Robust
+group imdb_robust
+
+cache imdb.duckdb
+
+init
+LOAD 'build/release/extension/robust/robust.duckdb_extension';
+SET disabled_optimizers = 'join_filter_pushdown';
+SET robust_heuristic = 'join_order';
+
+run benchmark/imdb_plan_cost/queries/${QUERY_NUMBER_PADDED}.sql
