@@ -45,8 +45,8 @@ Sum of `operator_cardinality` across all `HASH_JOIN` operators in the plan — i
 
 ```bash
 git clone --recurse-submodules https://github.com/robust-labs/robust.git
-cd robust
 
+# vcpkg can live anywhere; pick a location once and reuse it for any C++ project  
 git clone https://github.com/Microsoft/vcpkg.git
 ./vcpkg/bootstrap-vcpkg.sh
 export VCPKG_TOOLCHAIN_PATH=$(pwd)/vcpkg/scripts/buildsystems/vcpkg.cmake
@@ -82,14 +82,50 @@ The extension is not published to the DuckDB extension repository, so it must be
 ```sql
 LOAD 'build/release/extension/robust/robust.duckdb_extension';
 
--- correctness check
-CREATE TEMP TABLE t1 AS SELECT i AS id FROM range(100000) tbl(i);
-CREATE TEMP TABLE t2 AS SELECT i AS id FROM range(50000)  tbl(i);
-SELECT count(*) FROM t1 JOIN t2 ON t1.id = t2.id;          -- returns 50000
+-- Robust is designed for multi-way joins; it intentionally stays out of the way
+-- when the query has <= 1 join. The example below is a 3-way star schema:
+-- a wide fact table joined to two dimensions, with selective filters on the dims.
+CREATE TEMP TABLE orders AS
+    SELECT i              AS order_id,
+           i % 1000       AS customer_id,
+           i % 100        AS product_id,
+           (i * 13) % 10000 AS amount
+    FROM range(1000000) tbl(i);
 
--- inspect the rewritten plan (look for CREATE_FILTER / PROBE_FILTER)
-EXPLAIN SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;
+CREATE TEMP TABLE customers AS
+    SELECT i AS customer_id, 'cust_' || i AS name
+    FROM range(1000) tbl(i);
+
+CREATE TEMP TABLE products AS
+    SELECT i AS product_id, i % 10 AS category
+    FROM range(100) tbl(i);
+
+-- 3-way join with filters on each dimension.
+-- Robust builds filters (currently bloom filters, min/max ranges, and IN-lists
+-- where applicable — the filter set is extensible) from the filtered rows of
+-- customers and products, then propagates them across the join graph in two
+-- passes: a forward pass pushes filters down to probe-side scans (here, the
+-- orders scan), and a backward pass broadcasts them across the rest of the
+-- graph. Only rows that survive every applicable filter reach the hash joins.
+SELECT count(*), sum(o.amount)
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+JOIN products  p ON o.product_id  = p.product_id
+WHERE p.category = 3
+  AND c.name LIKE 'cust_1%';
+
+-- inspect the rewritten plan: expect CREATE_FILTER nodes above the filtered
+-- scans of customers/products, and PROBE_FILTER feeding the orders scan.
+EXPLAIN
+SELECT count(*), sum(o.amount)
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+JOIN products  p ON o.product_id  = p.product_id
+WHERE p.category = 3
+  AND c.name LIKE 'cust_1%';
 ```
+
+For a larger / more realistic workload, see [Benchmarks (JOB)](#benchmarks-job) below — the JOB suite has 113 queries (3–17-way joins over IMDb) that the extension is tuned against.
 
 ### Settings
 

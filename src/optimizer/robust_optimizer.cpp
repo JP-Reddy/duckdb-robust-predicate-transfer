@@ -831,7 +831,8 @@ std::pair<unordered_map<LogicalOperator *, vector<FilterOperation>>,
 RobustOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &mst_edges) {
 	// step 1: build rooted tree from MST.
 	// BuildRootedTree stores non-const JoinEdge* internally for adjacency-list layout; does not mutate elements.
-	TreeNode *root = BuildRootedTree(const_cast<vector<JoinEdge> &>(mst_edges)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+	TreeNode *root =
+	    BuildRootedTree(const_cast<vector<JoinEdge> &>(mst_edges)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
 
 	// check if tree building failed
 	if (!root) {
