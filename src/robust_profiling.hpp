@@ -154,12 +154,12 @@ public:
 				for (size_t pi = 0; pi < s->probe_table_indices.size(); pi++) {
 					if (pi > 0) {
 						probe_names += ",";
-}
+					}
 					probe_names += GetName(s->probe_table_indices[pi]);
 				}
 				if (probe_names.empty()) {
 					probe_names = "?";
-}
+				}
 				Printer::PrintF(
 				    "CREATE_FILTER [%s]: [build=%s -> probe=%s] %llu rows, sink=%lldus, finalize=%lldus, source=%lldus",
 				    pass.c_str(), GetName(s->build_table_idx).c_str(), probe_names.c_str(),
@@ -209,7 +209,8 @@ public:
 		int64_t total_rows_in = fwd_rows_in + bwd_rows_in;
 		int64_t total_rows_out = fwd_rows_out + bwd_rows_out;
 		if (total_rows_in > 0) {
-			double filtered_pct = 100.0 * (1.0 - static_cast<double>(total_rows_out) / static_cast<double>(total_rows_in));
+			double filtered_pct =
+			    100.0 * (1.0 - static_cast<double>(total_rows_out) / static_cast<double>(total_rows_in));
 			Printer::PrintF("  total probe: %lld us, filtered: %lld / %lld rows (%.1f%% removed)",
 			                (int64_t)(fwd_probe_us + bwd_probe_us), (int64_t)(total_rows_in - total_rows_out),
 			                (int64_t)total_rows_in, filtered_pct);

@@ -17,7 +17,7 @@
 namespace duckdb {
 
 PhysicalCreateFilter::PhysicalCreateFilter(PhysicalPlan &physical_plan,
-                                           const shared_ptr<FilterOperation>& filter_operation,
+                                           const shared_ptr<FilterOperation> &filter_operation,
                                            vector<LogicalType> types, idx_t estimated_cardinality,
                                            vector<idx_t> bound_column_indices)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
@@ -58,7 +58,7 @@ InsertionOrderPreservingMap<string> PhysicalCreateFilter::ParamsToString() const
 		if (!found) {
 			if (!probe_tables.empty()) {
 				probe_tables += ", ";
-}
+			}
 			probe_tables += to_string(col.table_index);
 			seen_probe.push_back(col.table_index);
 		}

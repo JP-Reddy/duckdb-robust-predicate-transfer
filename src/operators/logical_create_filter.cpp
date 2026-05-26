@@ -38,7 +38,7 @@ InsertionOrderPreservingMap<string> LogicalCreateFilter::ParamsToString() const 
 		if (!found) {
 			if (!probe_tables.empty()) {
 				probe_tables += ", ";
-}
+			}
 			probe_tables += to_string(col.table_index);
 			seen_probe.push_back(col.table_index);
 		}
