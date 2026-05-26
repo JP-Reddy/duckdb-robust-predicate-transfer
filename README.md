@@ -7,7 +7,7 @@
 [![JOB speedup](https://img.shields.io/badge/JOB_geomean-1.76×-brightgreen)](#benchmark-results)
 [![JOB memory](https://img.shields.io/badge/JOB_memory-1.67×_lower-brightgreen)](#benchmark-results)
 
-A DuckDB extension that implements **Robust Predicate Transfer** — a sideways-information-passing technique that propagates bloom filters, min/max ranges, and `IN`-lists across the entire join graph of a multi-join query, then pushes those filters down to the storage layer so probe-side scans skip rows that can't survive downstream joins.
+A DuckDB extension that implements **Predicate Transfer** — a sideways-information-passing technique that propagates bloom filters, min/max ranges, and `IN`-lists across the entire join graph of a multi-join query, then pushes those filters down to the storage layer so probe-side scans skip rows that can't survive downstream joins.
 
 ## Overview
 
