@@ -129,13 +129,18 @@ For a larger / more realistic workload, see [Benchmarks (JOB)](#benchmarks-job) 
 
 ### Settings
 
-```sql
-SET robust_heuristic = 'join_order';     -- default: respect DuckDB's join enumerator
-SET robust_heuristic = 'largest_root';   -- alternative: pick largest table as root of DAG
-SET robust_pass_mode = 'forward';        -- forward-only (skip backward broadcast)
-SET robust_pass_mode = 'both';           -- default: forward + backward
-PRAGMA robust_profiling = 1;             -- emit per-operator filter stats in profile output
-```
+| Setting | Type | Default | Controls |
+|---|---|---|---|
+| `robust_heuristic` | VARCHAR | `'join_order'` | DAG construction heuristic: `'join_order'` (DFS-build-first, follows DuckDB's own join order) or `'largest_root'` (Prim's MST rooted at largest table; the original paper formulation) |
+| `robust_pass_mode` | VARCHAR | `'both'` | Whether to run both passes or only forward: `'both'` or `'forward_only'` |
+| `robust_flip_roots` | BOOLEAN | `true` | In `join_order` mode, iteratively flip non-anchor roots to leaves so the largest table ends up as the sole anchor root |
+| `robust_filter_type` | VARCHAR | `'all'` | Restrict filter types pushed to scans: `'all'`, `'bf_only'`, `'minmax_only'` |
+| `robust_dynamic_or_filter_threshold` | UBIGINT | `50` | Max distinct build keys to use an IN-list (rather than a bloom filter) for scan pushdown |
+| `robust_profiling` | BOOLEAN | `false` | Emit per-operator timing and row-count stats after each query |
+| `robust_display_dag` | BOOLEAN | `false` | Print the logical transfer DAG to stdout before plan modification |
+| `robust_display_physical_dag` | BOOLEAN | `false` | Print the physical-plan DAG (before filter insertion) to stdout |
+
+All settings are registered in [`src/robust_extension.cpp`](src/robust_extension.cpp). See [docs/architecture.md](docs/architecture.md) for what these controls actually do at the algorithm level.
 
 ## Benchmarks (JOB)
 
