@@ -1,13 +1,14 @@
 # Robust
 
-[![CI](https://github.com/robust-labs/robust/actions/workflows/MainDistributionPipeline.yml/badge.svg)](https://github.com/robust-labs/robust/actions/workflows/MainDistributionPipeline.yml)
-[![DuckDB](https://img.shields.io/badge/DuckDB-1.5--rc_(88277463aa)-yellow)](https://github.com/duckdb/duckdb/commit/88277463aa86b998f241a0cd0f87ea647e749576)
-[![extension-ci-tools](https://img.shields.io/badge/extension--ci--tools-v1.4.4_(32eb753d9b)-blue)](https://github.com/duckdb/extension-ci-tools/commit/32eb753d9b660bf90bdca42652cf40c1ef64bf67)
+[![CI](https://github.com/robust-sql/robust/actions/workflows/MainDistributionPipeline.yml/badge.svg)](https://github.com/robust-sql/robust/actions/workflows/MainDistributionPipeline.yml)
+[![DuckDB](https://img.shields.io/badge/DuckDB-v1.5.3-blue)](https://github.com/duckdb/duckdb/releases/tag/v1.5.3)
+[![extension-ci-tools](https://img.shields.io/badge/extension--ci--tools-v1.5.3-blue)](https://github.com/duckdb/extension-ci-tools/tree/v1.5.3)
 [![status](https://img.shields.io/badge/status-WIP-orange)](#current-status)
-[![JOB speedup](https://img.shields.io/badge/JOB_geomean-1.76×-brightgreen)](#benchmark-results)
-[![JOB memory](https://img.shields.io/badge/JOB_memory-1.67×_lower-brightgreen)](#benchmark-results)
+<!-- JOB performance badges (geomean speedup, memory ratio) removed pending re-measurement on DuckDB v1.5.3. -->
+<!-- [![JOB speedup](https://img.shields.io/badge/JOB_geomean-1.76×-brightgreen)](#benchmark-results) -->
+<!-- [![JOB memory](https://img.shields.io/badge/JOB_memory-1.67×_lower-brightgreen)](#benchmark-results) -->
 
-A DuckDB extension that implements **Predicate Transfer** — a sideways-information-passing technique that propagates bloom filters, min/max ranges, and `IN`-lists across the entire join graph of a multi-join query, then pushes those filters down to the storage layer so probe-side scans skip rows that can't survive downstream joins.
+A DuckDB extension that implements **Predicate Transfer**: a novel method that optimizes join performance by pre-filtering tables to reduce the join input sizes.
 
 ## Overview
 
@@ -44,7 +45,7 @@ Sum of `operator_cardinality` across all `HASH_JOIN` operators in the plan — i
 ### Prerequisites
 
 ```bash
-git clone --recurse-submodules https://github.com/robust-labs/robust.git
+git clone --recurse-submodules https://github.com/robust-sql/robust.git
 
 # vcpkg can live anywhere; pick a location once and reuse it for any C++ project  
 git clone https://github.com/Microsoft/vcpkg.git
@@ -260,7 +261,7 @@ Output: `benchmark_results/{baseline_raw.tsv, robust_raw.tsv, comparison.tsv}`.
 1. **Build DAG.** The optimizer extracts equality joins, builds equivalence classes over join columns (union-find), and constructs a DAG over base tables with filtered tables as roots.
 2. **Forward pass (leaves → root).** For each edge, the smaller side builds a filter (bloom filter + min/max + optional `IN`-list when the build side has few distinct values). The filter is applied to the larger side via a `PROBE_FILTER` operator inserted above the scan.
 3. **Backward pass (root → leaves).** Each filter is broadcast across its equivalence class. If tables A, B, C all join on the same key and a filter was built from C, it's pushed to A and B as well — even though they never directly joined with C.
-4. **Scan pushdown.** Built filters are pushed into DuckDB's `dynamic_filters` infrastructure via `BFTableFilter` + `SelectivityOptionalFilter`, so the storage layer can skip rows/segments before they're decompressed.
+4. **Scan pushdown.** Built filters are pushed into DuckDB's `dynamic_filters` infrastructure via `BFTableFilter` + `SelectivityOptionalFilter`, so the scan can skip rows/segments before they're decompressed.
 
 
 ## Bloom filter implementation
@@ -283,8 +284,8 @@ The bloom filter is one of three filter types pushed in a single `CREATE_FILTER`
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| `duckdb` submodule | [`88277463aa`](https://github.com/duckdb/duckdb/commit/88277463aa86b998f241a0cd0f87ea647e749576) | Merge commit "Merge V1.5 -> Main", 2026-02-23. Not a release tag. |
-| `extension-ci-tools` submodule | [`32eb753d9b`](https://github.com/duckdb/extension-ci-tools/commit/32eb753d9b660bf90bdca42652cf40c1ef64bf67) | `v1.4.4` branch tip |
+| `duckdb` submodule | [`v1.5.3`](https://github.com/duckdb/duckdb/releases/tag/v1.5.3) | release tag |
+| `extension-ci-tools` submodule | [`v1.5.3`](https://github.com/duckdb/extension-ci-tools/tree/v1.5.3) | `v1.5.3` branch tip |
 | OpenSSL | 3.5.3+ via vcpkg | dependency of DuckDB build |
 
 CI pins are kept in sync with submodule pins in [`.github/workflows/MainDistributionPipeline.yml`](.github/workflows/MainDistributionPipeline.yml).

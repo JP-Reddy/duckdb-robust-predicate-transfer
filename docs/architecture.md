@@ -45,7 +45,7 @@ The two systems are complementary. On baseline measurements we leave JFP on; on 
 
 ### When Robust engages
 
-- **≥ 2 joins required.** Single-join queries get no benefit from sideways propagation (JFP already handles them). `RobustOptimizerContextState::Optimize` checks `edges.size() <= 1` and returns the plan unchanged ([`src/optimizer/robust_optimizer.cpp:1603`](../src/optimizer/robust_optimizer.cpp)).
+- **≥ 2 joins required.** Single-join queries get no benefit from cross-graph propagation (JFP already handles them). `RobustOptimizerContextState::Optimize` checks `edges.size() <= 1` and returns the plan unchanged ([`src/optimizer/robust_optimizer.cpp:1603`](../src/optimizer/robust_optimizer.cpp)).
 - **Equality joins only.** Non-equality predicates aren't tracked. Range joins flow through but produce no filters.
 - **Acyclic graphs.** The current focus is on acyclic join graphs, where Robust's behaviour is well understood. Behaviour on cyclic join graphs is not characterised yet — they may work, may degrade, or may crash; characterising and handling them properly is on the near-term roadmap.
 
