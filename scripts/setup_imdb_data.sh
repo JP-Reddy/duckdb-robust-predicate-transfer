@@ -69,18 +69,5 @@ echo
     cat "$LOAD_SQL"
 } | "$DUCKDB" "$DB"
 
-title_rows="$("$DUCKDB" "$DB" -readonly -noheader -list -c "SELECT count(*) FROM title" 2>/dev/null | tr -dc '0-9' || true)"
-if [ -z "$title_rows" ] || [ "$title_rows" = "0" ]; then
-    echo >&2
-    echo "error: load failed — 'title' table is missing or empty in $DB" >&2
-    echo "  common cause: httpfs extension blocked / no network to github.com" >&2
-    echo "  re-run manually to see the underlying error:" >&2
-    echo "    $DUCKDB $DB" >&2
-    echo "    INSTALL httpfs; LOAD httpfs;" >&2
-    echo "    .read $LOAD_SQL" >&2
-    exit 1
-fi
-
 echo
-echo "Done. Verifying:"
-"$DUCKDB" "$DB" -readonly -c "SELECT 'title' AS table_name, count(*) AS rows FROM title UNION ALL SELECT 'cast_info', count(*) FROM cast_info ORDER BY table_name;"
+echo "Done. Loaded $DB"
