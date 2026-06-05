@@ -147,9 +147,16 @@ All settings are registered in [`src/robust_extension.cpp`](src/robust_extension
 
 ### Setup
 
+One-time data setup — downloads 21 IMDB tables (~2.6G) from DuckDB's public
+release artifacts and materializes them as a native DuckDB database at
+`jobdata/imdb.duckdb`:
+
 ```bash
-# expects jobdata/job.duckdb (load JOB tables via your tool of choice)
-ls jobdata/job.duckdb
+./scripts/setup_imdb_data.sh
+```
+
+```bash
+ls jobdata/imdb.duckdb
 ls jobdata/queries/1a.sql    # 113 queries
 ```
 

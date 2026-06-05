@@ -85,7 +85,7 @@ if [ "$WORKLOAD" = "tpch" ]; then
         fi
     fi
 else
-    DB="$PROJECT_ROOT/jobdata/job.duckdb"
+    DB="$PROJECT_ROOT/jobdata/imdb.duckdb"
     QUERIES_DIR="$PROJECT_ROOT/jobdata/queries"
 fi
 

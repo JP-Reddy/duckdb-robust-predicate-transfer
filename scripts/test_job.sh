@@ -19,7 +19,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DUCKDB="$PROJECT_ROOT/build/release/duckdb"
-DB="$PROJECT_ROOT/jobdata/job.duckdb"
+DB="$PROJECT_ROOT/jobdata/imdb.duckdb"
 EXT="$PROJECT_ROOT/build/release/extension/robust/robust.duckdb_extension"
 QUERIES_DIR="$PROJECT_ROOT/jobdata/queries"
 RESULTS_DIR="$PROJECT_ROOT/job_test_results"
@@ -105,7 +105,7 @@ check_prerequisites() {
 
     if [ ! -f "$DB" ]; then
         echo -e "${RED}Error: JOB database not found at $DB${NC}"
-        echo "Run: $DUCKDB $DB -unsigned -f jobdata/load_job.sql"
+        echo "Run: ./scripts/setup_imdb_data.sh"
         exit 1
     fi
 

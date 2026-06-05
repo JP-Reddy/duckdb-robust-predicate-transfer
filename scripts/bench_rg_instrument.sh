@@ -24,7 +24,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 DUCKDB="$PROJECT_ROOT/build/release/duckdb"
 EXT="$PROJECT_ROOT/build/release/extension/robust/robust.duckdb_extension"
-DB="$PROJECT_ROOT/jobdata/job.duckdb"
+DB="$PROJECT_ROOT/jobdata/imdb.duckdb"
 QUERIES_DIR="$PROJECT_ROOT/jobdata/queries"
 AGG="$SCRIPT_DIR/rg_aggregate.py"
 
