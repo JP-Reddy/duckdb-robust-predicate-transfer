@@ -63,7 +63,23 @@ echo "  source : $LOAD_SQL"
 echo "  fetches: 21 parquet files from github.com/duckdb/duckdb-data (~2.6G)"
 echo
 
-"$DUCKDB" "$DB" < "$LOAD_SQL"
+{
+    echo ".bail on"
+    echo "INSTALL httpfs; LOAD httpfs;"
+    cat "$LOAD_SQL"
+} | "$DUCKDB" "$DB"
+
+title_rows="$("$DUCKDB" "$DB" -readonly -noheader -list -c "SELECT count(*) FROM title" 2>/dev/null | tr -dc '0-9' || true)"
+if [ -z "$title_rows" ] || [ "$title_rows" = "0" ]; then
+    echo >&2
+    echo "error: load failed — 'title' table is missing or empty in $DB" >&2
+    echo "  common cause: httpfs extension blocked / no network to github.com" >&2
+    echo "  re-run manually to see the underlying error:" >&2
+    echo "    $DUCKDB $DB" >&2
+    echo "    INSTALL httpfs; LOAD httpfs;" >&2
+    echo "    .read $LOAD_SQL" >&2
+    exit 1
+fi
 
 echo
 echo "Done. Verifying:"
