@@ -5,6 +5,7 @@
 #include "duckdb/common/printer.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <chrono>
+#include <ctime>
 #include <atomic>
 #include <mutex>
 #include <vector>
@@ -46,6 +47,24 @@ struct ScopedTimer {
 		auto end = std::chrono::high_resolution_clock::now();
 		target.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(),
 		                 std::memory_order_relaxed);
+	}
+};
+
+// RAII timer that adds elapsed *thread CPU* microseconds to an atomic counter.
+// uses CLOCK_THREAD_CPUTIME_ID so the measurement reflects work actually executed and
+// is not inflated by thread descheduling/contention (which wall-clock would capture).
+struct ScopedCpuTimer {
+	std::atomic<int64_t> &target;
+	timespec start;
+
+	explicit ScopedCpuTimer(std::atomic<int64_t> &target) : target(target) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+	}
+	~ScopedCpuTimer() {
+		timespec end;
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+		int64_t us = (end.tv_sec - start.tv_sec) * 1000000LL + (end.tv_nsec - start.tv_nsec) / 1000;
+		target.fetch_add(us, std::memory_order_relaxed);
 	}
 };
 
