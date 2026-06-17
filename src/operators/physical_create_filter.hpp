@@ -11,6 +11,7 @@
 namespace duckdb {
 
 struct CreateFilterStats;
+class CreateFilterGlobalSinkState;
 
 class PhysicalCreateFilter : public PhysicalOperator {
 public:
@@ -36,6 +37,10 @@ public:
 	SinkCombineResultType Combine(ExecutionContext &context, OperatorSinkCombineInput &input) const override;
 	SinkFinalizeType Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
 	                          OperatorSinkFinalizeInput &input) const override;
+
+	// mark filters finalized, signal empty probe, push dynamic filters; runs inline for small
+	// builds or from the parallel build event's completion for large builds.
+	void PostBuildFinalize(const CreateFilterGlobalSinkState &gsink, ClientContext &context) const;
 
 	bool IsSink() const override {
 		return true;

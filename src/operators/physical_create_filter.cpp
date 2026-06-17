@@ -2,6 +2,9 @@
 #include "bloom_filter.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parallel/pipeline.hpp"
+#include "duckdb/parallel/base_pipeline_event.hpp"
+#include "duckdb/parallel/executor_task.hpp"
+#include "duckdb/parallel/task_scheduler.hpp"
 #include "utils/debug_utils.hpp"
 #include "robust_profiling.hpp"
 #include "probe_empty_registry.hpp"
@@ -189,12 +192,6 @@ static void UpdateMinMax(Vector &vec, idx_t count, ColumnMinMax &mm) {
 CreateFilterGlobalSinkState::CreateFilterGlobalSinkState(ClientContext &context, const PhysicalCreateFilter &op)
     : op(op) {
 	total_data = make_uniq<ColumnDataCollection>(context, op.types);
-	// initialize bloom filters upfront so Sink can insert directly
-	for (auto &entry : op.bloom_filter_map) {
-		if (entry.second) {
-			entry.second->Initialize(context, op.estimated_cardinality);
-		}
-	}
 	// resolve shared probe-empty flag once (single-threaded); forward pass only
 	if (op.is_forward_pass) {
 		auto reg = GetProbeEmptyRegistry(context);
@@ -239,20 +236,11 @@ SinkResultType PhysicalCreateFilter::Sink(ExecutionContext &context, DataChunk &
 
 	CreateFilterLocalSinkState &local_state = input.local_state.Cast<CreateFilterLocalSinkState>();
 	if (profiling_stats) {
-		ScopedTimer timer(profiling_stats->sink_time_us);
+		ScopedCpuTimer timer(profiling_stats->sink_time_us);
 		profiling_stats->rows_materialized.fetch_add(chunk.size(), std::memory_order_relaxed);
 		local_state.local_data->Append(chunk);
 	} else {
 		local_state.local_data->Append(chunk);
-	}
-
-	// insert into bloom filters
-	for (size_t i = 0; i < filter_operation->build_columns.size(); i++) {
-		const auto &col = filter_operation->build_columns[i];
-		auto it = bloom_filter_map.find(col);
-		if (it != bloom_filter_map.end() && it->second) {
-			it->second->Insert(chunk, {bound_column_indices[i]});
-		}
 	}
 
 	// compute min-max using typed pointer access
@@ -455,6 +443,102 @@ static void PushDynamicFilters(const PhysicalCreateFilter &op, const CreateFilte
 	}
 }
 
+// parallelize the hashing/insert pass only when the build side is large enough to amortize
+// task-scheduling overhead; below this an inline single-threaded build is faster.
+static constexpr idx_t PARALLEL_BUILD_THRESHOLD = 102400; // ~100k rows (50 vectors)
+
+void PhysicalCreateFilter::PostBuildFinalize(const CreateFilterGlobalSinkState &gsink, ClientContext &context) const {
+	const idx_t actual_rows = gsink.total_data->Count();
+
+	for (auto &entry : bloom_filter_map) {
+		if (entry.second) {
+			entry.second->finalized_ = true;
+		}
+	}
+
+	// if this forward CREATE_FILTER produced an empty BF, signal sibling CREATE_FILTERs targeting
+	// the same probe that the probe side will be empty (relaxed store, lock-free).
+	if (gsink.probe_empty_flag && actual_rows == 0) {
+		gsink.probe_empty_flag->store(true, std::memory_order_relaxed);
+	}
+
+	PushDynamicFilters(*this, gsink, context);
+}
+
+namespace {
+
+// hashes + inserts a disjoint range of total_data chunks into the (already-allocated) BFs.
+// native BF inserts use atomic fetch_or, so concurrent inserts into the same filter are safe.
+class CreateFilterBuildTask : public ExecutorTask {
+public:
+	CreateFilterBuildTask(Pipeline &pipeline, shared_ptr<Event> event, const PhysicalCreateFilter &op,
+	                      CreateFilterGlobalSinkState &gsink, idx_t chunk_from, idx_t chunk_to)
+	    : ExecutorTask(pipeline.GetClientContext(), std::move(event), op), op(op), gsink(gsink),
+	      chunk_from(chunk_from), chunk_to(chunk_to) {
+	}
+
+	TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
+		DataChunk chunk;
+		gsink.total_data->InitializeScanChunk(chunk);
+		for (idx_t cid = chunk_from; cid < chunk_to; cid++) {
+			gsink.total_data->FetchChunk(cid, chunk);
+			for (size_t i = 0; i < op.filter_operation->build_columns.size(); i++) {
+				auto it = op.bloom_filter_map.find(op.filter_operation->build_columns[i]);
+				if (it != op.bloom_filter_map.end() && it->second) {
+					it->second->Insert(chunk, {op.bound_column_indices[i]});
+				}
+			}
+		}
+		event->FinishTask();
+		return TaskExecutionResult::TASK_FINISHED;
+	}
+
+	string TaskType() const override {
+		return "CreateFilterBuildTask";
+	}
+
+private:
+	const PhysicalCreateFilter &op;
+	CreateFilterGlobalSinkState &gsink;
+	idx_t chunk_from;
+	idx_t chunk_to;
+};
+
+class CreateFilterBuildEvent : public BasePipelineEvent {
+public:
+	CreateFilterBuildEvent(Pipeline &pipeline, const PhysicalCreateFilter &op, CreateFilterGlobalSinkState &gsink)
+	    : BasePipelineEvent(pipeline), op(op), gsink(gsink) {
+	}
+
+	void Schedule() override {
+		auto &client = pipeline->GetClientContext();
+		const idx_t num_threads = NumericCast<idx_t>(TaskScheduler::GetScheduler(client).NumberOfThreads());
+		const idx_t chunk_count = gsink.total_data->ChunkCount();
+		const idx_t num_tasks = MaxValue<idx_t>(MinValue<idx_t>(num_threads, chunk_count), 1);
+		const idx_t chunks_per_task = (chunk_count + num_tasks - 1) / num_tasks;
+
+		vector<shared_ptr<Task>> tasks;
+		for (idx_t cid = 0; cid < chunk_count;) {
+			const idx_t from = cid;
+			const idx_t to = MinValue<idx_t>(from + chunks_per_task, chunk_count);
+			tasks.push_back(make_uniq<CreateFilterBuildTask>(*pipeline, shared_from_this(), op, gsink, from, to));
+			cid = to;
+		}
+		SetTasks(std::move(tasks));
+	}
+
+	void FinishEvent() override {
+		// runs after all build tasks complete, before dependent (probe) pipelines run
+		op.PostBuildFinalize(gsink, pipeline->GetClientContext());
+	}
+
+private:
+	const PhysicalCreateFilter &op;
+	CreateFilterGlobalSinkState &gsink;
+};
+
+} // namespace
+
 SinkFinalizeType PhysicalCreateFilter::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
                                                 OperatorSinkFinalizeInput &input) const {
 	// lazy init profiling if Sink was never called (e.g., empty input)
@@ -486,11 +570,24 @@ SinkFinalizeType PhysicalCreateFilter::Finalize(Pipeline &pipeline, Event &event
 	D_PRINTF("[FINALIZE] CREATE_FILTER (build=%s): total_data contains %llu rows, %zu bloom filters",
 	         build_table.c_str(), (unsigned long long)gsink.total_data->Count(), bloom_filter_map.size());
 
-	// 2. resize any undersized BFs and rehash from materialized data.
-	// rule: resize iff allocated_bits / actual_rows < 8  (i.e., <8 bits/key -> FPR > ~2%).
-	// shrink-on-overestimate is intentionally skipped.
-	// TODO - evaluate memory savings and performance tradeoff with shrink-on-overestimate
+	// 2. build bloom filters from the materialized data, sized to the actual row count
 	const idx_t actual_rows = gsink.total_data->Count();
+
+	// large build side: allocate up front (sized to actual rows), then hash/insert in parallel via
+	// scheduled tasks; post-build steps run from the event's completion.
+	if (actual_rows >= PARALLEL_BUILD_THRESHOLD && gsink.total_data->ChunkCount() > 1) {
+		for (size_t i = 0; i < filter_operation->build_columns.size(); i++) {
+			auto it = bloom_filter_map.find(filter_operation->build_columns[i]);
+			if (it != bloom_filter_map.end() && it->second) {
+				it->second->Initialize(context, actual_rows);
+			}
+		}
+		fin_timer.reset(); // insert time is spent on the scheduled tasks, not this thread
+		event.InsertEvent(make_shared_ptr<CreateFilterBuildEvent>(pipeline, *this, gsink));
+		return SinkFinalizeType::READY;
+	}
+
+	// small (or empty) build side: build inline on this thread
 	if (actual_rows > 0) {
 		for (size_t i = 0; i < filter_operation->build_columns.size(); i++) {
 			const auto &col = filter_operation->build_columns[i];
@@ -498,36 +595,11 @@ SinkFinalizeType PhysicalCreateFilter::Finalize(Pipeline &pipeline, Event &event
 			if (it == bloom_filter_map.end() || !it->second) {
 				continue;
 			}
-			auto &bf = *it->second;
-			const idx_t min_bits = std::max<idx_t>(512, bf.SizedForRows() * 12);
-			const idx_t allocated_bits = NextPowerOfTwo(min_bits);
-			if (actual_rows * 8 > allocated_bits) {
-				D_PRINTF("[RESIZE] CREATE_FILTER (build=%s) col=(%llu.%llu) sized_for=%llu actual=%llu "
-				         "allocated_bits=%llu -> rehashing",
-				         build_table.c_str(), (unsigned long long)col.table_index, (unsigned long long)col.column_index,
-				         (unsigned long long)bf.SizedForRows(), (unsigned long long)actual_rows,
-				         (unsigned long long)allocated_bits);
-				bf.ReinitializeAndRehash(context, actual_rows, *gsink.total_data, {bound_column_indices[i]});
-			}
+			it->second->ReinitializeAndRehash(context, actual_rows, *gsink.total_data, {bound_column_indices[i]});
 		}
 	}
 
-	// 3. mark bloom filters as finalized
-	for (auto &entry : bloom_filter_map) {
-		if (entry.second) {
-			entry.second->finalized_ = true;
-		}
-	}
-
-	// 4. if this forward CREATE_FILTER produced an empty BF, signal sibling CREATE_FILTERs
-	// targeting the same probe that the probe side will be empty (relaxed store, lock-free).
-	if (gsink.probe_empty_flag && actual_rows == 0) {
-		gsink.probe_empty_flag->store(true, std::memory_order_relaxed);
-	}
-
-	// 5. push dynamic filters to table scans
-	PushDynamicFilters(*this, gsink, context);
-
+	PostBuildFinalize(gsink, context);
 	return SinkFinalizeType::READY;
 }
 
