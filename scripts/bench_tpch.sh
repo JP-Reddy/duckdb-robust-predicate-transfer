@@ -24,6 +24,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
+# provision tpchdata/queries + answers from the submodule if missing
+if [ -z "$(ls -A "$PROJECT_ROOT/tpchdata/queries"/q*.sql 2>/dev/null)" ]; then
+    echo "TPCH queries not found; running setup_tpch_data.sh..."
+    "$SCRIPT_DIR/setup_tpch_data.sh"
+fi
+
 RUNNER="$PROJECT_ROOT/build/release/benchmark/benchmark_runner"
 PATTERN="q(02|03|07|08|10|11|17|18|21)\.benchmark"
 RUN_BASELINE=true

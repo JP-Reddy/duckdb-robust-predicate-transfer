@@ -9,3 +9,7 @@ duckdb_extension_load(robust
 
 # Any extra extensions that should be built
 # e.g.: duckdb_extension_load(json)
+
+# tpch: statically linked so the benchmark_runner can CALL dbgen / run the
+# tpch benchmark suites (scripts/bench_tpch.sh). Required by `require tpch`.
+duckdb_extension_load(tpch)
