@@ -1199,6 +1199,7 @@ RobustOptimizerContextState::BuildStackedBFOperators(unique_ptr<LogicalOperator>
 				// multiple consecutive CREATEs for same table - merge them
 				FilterOperation merged_op = consecutive_creates[0];
 				merged_op.build_columns.clear();
+				merged_op.probe_columns.clear();
 
 				// collect all build columns
 				for (const auto &op : consecutive_creates) {
