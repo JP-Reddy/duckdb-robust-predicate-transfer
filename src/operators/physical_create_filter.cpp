@@ -473,8 +473,8 @@ class CreateFilterBuildTask : public ExecutorTask {
 public:
 	CreateFilterBuildTask(Pipeline &pipeline, shared_ptr<Event> event, const PhysicalCreateFilter &op,
 	                      CreateFilterGlobalSinkState &gsink, idx_t chunk_from, idx_t chunk_to)
-	    : ExecutorTask(pipeline.GetClientContext(), std::move(event), op), op(op), gsink(gsink),
-	      chunk_from(chunk_from), chunk_to(chunk_to) {
+	    : ExecutorTask(pipeline.GetClientContext(), std::move(event), op), op(op), gsink(gsink), chunk_from(chunk_from),
+	      chunk_to(chunk_to) {
 	}
 
 	TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
