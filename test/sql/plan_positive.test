@@ -1,0 +1,147 @@
+# name: test/sql/plan_positive.test
+# group: [robust]
+# run plans which Robust filters should be inserted across settings combinations.
+
+statement ok
+LOAD 'build/release/extension/robust/robust.duckdb_extension';
+
+statement ok
+SET disabled_optimizers = 'join_filter_pushdown';
+
+statement ok
+CREATE TABLE t1(k12 INTEGER, k13 INTEGER, k14 INTEGER, v1 INTEGER);
+
+statement ok
+CREATE TABLE t2(k12 INTEGER, k23 INTEGER, k24 INTEGER, v2 INTEGER);
+
+statement ok
+CREATE TABLE t3(k13 INTEGER, k23 INTEGER, k34 INTEGER, v3 INTEGER);
+
+statement ok
+CREATE TABLE t4(k14 INTEGER, k24 INTEGER, k34 INTEGER, v4 INTEGER);
+
+statement ok
+INSERT INTO t1 VALUES
+    (1, 10, 100, 1),
+    (2, 20, NULL, 2),
+    (2, 30, 300, 3),
+    (NULL, 30, 400, 4),
+    (5, 40, 700, 5);
+
+statement ok
+INSERT INTO t2 VALUES
+    (1, 1000, 10000, 10),
+    (2, 2000, 20000, 20),
+    (3, 3000, 30000, 30),
+    (NULL, 4000, 40000, 40);
+
+statement ok
+INSERT INTO t3 VALUES
+    (10, 1000, 100000, 100),
+    (20, 2000, 200000, 200),
+    (20, 6000, 500000, 300),
+    (40, 4000, NULL, 400),
+    (NULL, 5000, 500000, 500);
+
+statement ok
+INSERT INTO t4 VALUES
+    (100, 10000, 100000, 1000),
+    (200, 20000, 200000, 2000),
+    (300, 21000, 200000, 3000),
+    (400, 40000, 300000, 4000),
+    (NULL, 50000, 500000, 5000);
+
+foreach heuristic join_order largest_root
+
+foreach pass_mode both forward_only
+
+foreach flip_roots true false
+
+statement ok
+SET robust_heuristic = '${heuristic}';
+
+statement ok
+SET robust_pass_mode = '${pass_mode}';
+
+statement ok
+SET robust_flip_roots = ${flip_roots};
+
+# Positive: three-table chain join
+query II
+EXPLAIN SELECT count(*)
+FROM t1, t2, t3
+WHERE t1.k12 = t2.k12
+  AND t2.k23 = t3.k23;
+----
+physical_plan	<REGEX>:.*CREATE_FILTER.*
+
+query II
+EXPLAIN SELECT count(*)
+FROM t1, t2, t3
+WHERE t1.k12 = t2.k12
+  AND t2.k23 = t3.k23;
+----
+physical_plan	<REGEX>:.*PROBE_FILTER.*
+
+# Correctness: triangle join
+query II
+EXPLAIN SELECT count(*)
+FROM t2, t3, t4
+WHERE t2.k23 = t3.k23
+  AND t3.k34 = t4.k34
+  AND t2.k24 = t4.k24;
+----
+physical_plan	<REGEX>:.*CREATE_FILTER.*
+
+query II
+EXPLAIN SELECT count(*)
+FROM t2, t3, t4
+WHERE t2.k23 = t3.k23
+  AND t3.k34 = t4.k34
+  AND t2.k24 = t4.k24;
+----
+physical_plan	<REGEX>:.*PROBE_FILTER.*
+
+# Negative: four-table chain join
+query II
+EXPLAIN SELECT count(*)
+FROM t1, t2, t3, t4
+WHERE t1.k12 = t2.k12
+  AND t2.k23 = t3.k23
+  AND t3.k34 = t4.k34;
+----
+physical_plan	<REGEX>:.*CREATE_FILTER.*
+
+query II
+EXPLAIN SELECT count(*)
+FROM t1, t2, t3, t4
+WHERE t1.k12 = t2.k12
+  AND t2.k23 = t3.k23
+  AND t3.k34 = t4.k34;
+----
+physical_plan	<REGEX>:.*PROBE_FILTER.*
+
+# Positive: star join
+query II
+EXPLAIN SELECT count(*)
+FROM t1, t2, t3, t4
+WHERE t1.k12 = t2.k12
+  AND t2.k23 = t3.k23
+  AND t2.k24 = t4.k24;
+----
+physical_plan	<REGEX>:.*CREATE_FILTER.*
+
+query II
+EXPLAIN SELECT count(*)
+FROM t1, t2, t3, t4
+WHERE t1.k12 = t2.k12
+  AND t2.k23 = t3.k23
+  AND t2.k24 = t4.k24;
+----
+physical_plan	<REGEX>:.*PROBE_FILTER.*
+
+endloop
+
+endloop
+
+endloop
