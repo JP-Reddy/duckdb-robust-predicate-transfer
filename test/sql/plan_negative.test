@@ -1,5 +1,6 @@
 # name: test/sql/plan_negative.test
-# group: [robust]
+# group: [sql]
+
 # run plans which Robust filters should not be inserted across settings combinations.
 
 statement ok
