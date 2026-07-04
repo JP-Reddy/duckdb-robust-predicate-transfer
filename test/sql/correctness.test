@@ -1,5 +1,6 @@
 # name: test/sql/correctness.test
-# group: [robust]
+# group: [sql]
+
 # run Robust correctness tests across settings combinations.
 
 statement ok

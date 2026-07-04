@@ -1,5 +1,6 @@
 # name: test/sql/plan_positive.test
-# group: [robust]
+# group: [sql]
+
 # run plans which Robust filters should be inserted across settings combinations.
 
 statement ok
