@@ -17,6 +17,7 @@
 #include "robust_profiling.hpp"
 #include "../utils/dag_printer.hpp"
 #include <chrono>
+#include <duckdb/planner/expression/bound_function_expression.hpp>
 
 namespace duckdb {
 // class LogicalCreateFilter;
@@ -105,6 +106,15 @@ void RobustOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &pla
 			if (op->expressions[i]->type == ExpressionType::BOUND_COLUMN_REF) {
 				auto &col_ref = op->expressions[i]->Cast<BoundColumnRefExpression>();
 				rename_col_bindings.insert({old_refs[i], col_ref.binding});
+			}
+			else if (op->expressions[i]->type == ExpressionType::BOUND_FUNCTION) {
+				auto &func_ref = op->expressions[i]->Cast<BoundFunctionExpression>();
+				for (const auto &arg : func_ref.children) {
+					if (arg->type == ExpressionType::BOUND_COLUMN_REF) {
+						auto &col_ref = arg->Cast<BoundColumnRefExpression>();
+						rename_col_bindings.insert({old_refs[i], col_ref.binding});
+					}
+				}
 			}
 		}
 		ExtractOperatorsRecursive(*op->children[0], join_ops);
@@ -513,6 +523,59 @@ static void UFUnion(map<ColKey, ColKey> &parent, ColKey a, ColKey b) {
 	}
 }
 
+// add a child->parent edge, or merge columns into an existing edge (multi-column join)
+static void AddOrMergeDAGEdge(PhysicalDAGNode *parent_node, PhysicalDAGNode *child_node,
+                              const ColumnBinding &parent_col, const ColumnBinding &child_col) {
+	for (auto &edge : child_node->edges_to_parents) {
+		if (edge.parent_table == parent_node->table_idx) {
+			edge.parent_cols.push_back(parent_col);
+			edge.child_cols.push_back(child_col);
+			return;
+		}
+	}
+	child_node->parents.push_back(parent_node);
+	parent_node->children.push_back(child_node);
+
+	PhysicalDAGEdge edge;
+	edge.parent_table = parent_node->table_idx;
+	edge.child_table = child_node->table_idx;
+	edge.parent_cols.push_back(parent_col);
+	edge.child_cols.push_back(child_col);
+	child_node->edges_to_parents.push_back(edge);
+}
+
+// recompute node levels: roots (no parents) = 0, others = max(parent levels) + 1
+static void RecomputeDAGLevels(vector<PhysicalDAGNode *> &all_nodes) {
+	for (auto *node : all_nodes) {
+		node->level = node->parents.empty() ? 0 : -1;
+	}
+	bool changed = true;
+	while (changed) {
+		changed = false;
+		for (auto *node : all_nodes) {
+			if (node->parents.empty()) {
+				continue;
+			}
+			int max_parent = -1;
+			bool all_set = true;
+			for (auto *p : node->parents) {
+				if (p->level < 0) {
+					all_set = false;
+					break;
+				}
+				max_parent = std::max(max_parent, p->level);
+			}
+			if (all_set && max_parent >= 0) {
+				int new_level = max_parent + 1;
+				if (new_level != node->level) {
+					node->level = new_level;
+					changed = true;
+				}
+			}
+		}
+	}
+}
+
 // recursive DFS for building physical DAG
 // uses build-first traversal so DFS index matches execution order
 // (first-executed = lowest index, last-executed = highest index)
@@ -603,67 +666,11 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RobustO
 				child_col = left_resolved;
 			}
 
-			// equiv resolution on child side: find shallowest equivalent (highest DFS, != parent)
-			ColKey child_root = UFFind(uf_parent, {child_col.table_index, child_col.column_index});
-			idx_t best_child = child_idx;
-			int best_child_dfs = dfs_index.count(child_idx) ? dfs_index[child_idx] : -1;
-			ColumnBinding best_child_col = child_col;
-
-			vector<ColKey> all_keys;
-			for (auto &entry : uf_parent) {
-				all_keys.push_back(entry.first);
-			}
-			for (auto &key : all_keys) {
-				if (UFFind(uf_parent, key) != child_root) {
-					continue;
-				}
-				idx_t candidate = key.first;
-				if (candidate == parent_idx) {
-					continue;
-				}
-				if (!node_map.count(candidate)) {
-					continue;
-				}
-				int candidate_dfs = dfs_index.count(candidate) ? dfs_index[candidate] : -1;
-				if (candidate_dfs > best_child_dfs) {
-					best_child = candidate;
-					best_child_dfs = candidate_dfs;
-					best_child_col = ColumnBinding(key.first, key.second);
-				}
-			}
-
-			auto *parent_node = node_map[parent_idx];
-			auto *child_node = node_map[best_child];
-
-			// check if already linked
-			bool already_linked = false;
-			for (auto *p : child_node->parents) {
-				if (p == parent_node) {
-					already_linked = true;
-					break;
-				}
-			}
-
-			if (!already_linked) {
-				child_node->parents.push_back(parent_node);
-				parent_node->children.push_back(child_node);
-
-				PhysicalDAGEdge edge;
-				edge.parent_table = parent_idx;
-				edge.child_table = best_child;
-				edge.parent_cols.push_back(parent_col);
-				edge.child_cols.push_back(best_child_col);
-				child_node->edges_to_parents.push_back(edge);
-			} else {
-				// multi-column join: append columns to existing edge
-				for (auto &edge : child_node->edges_to_parents) {
-					if (edge.parent_table == parent_idx) {
-						edge.parent_cols.push_back(parent_col);
-						edge.child_cols.push_back(best_child_col);
-						break;
-					}
-				}
-			}
+			// connect the two tables named by this condition directly.
+			// UFUnion above records the equivalence class for downstream stage
+			// generation; edges here must stay 1:1 with join conditions so the
+			// DAG remains a connected spanning structure over the base tables.
+			AddOrMergeDAGEdge(node_map[parent_idx], node_map[child_idx], parent_col, child_col);
 		}
 		return;
 	}
@@ -682,35 +689,7 @@ vector<PhysicalDAGNode *> RobustOptimizerContextState::BuildPhysicalPlanDAG(Logi
 
 	PhysicalDAGDFS(op, table_mgr, *this, all_nodes, node_map, dfs_index, uf_parent);
 
-	// compute levels: roots (no parents) get 0, others get max(parent levels) + 1
-	for (auto *node : all_nodes) {
-		node->level = node->parents.empty() ? 0 : -1;
-	}
-	bool changed = true;
-	while (changed) {
-		changed = false;
-		for (auto *node : all_nodes) {
-			if (node->parents.empty()) {
-				continue;
-			}
-			int max_parent = -1;
-			bool all_set = true;
-			for (auto *p : node->parents) {
-				if (p->level < 0) {
-					all_set = false;
-					break;
-				}
-				max_parent = std::max(max_parent, p->level);
-			}
-			if (all_set && max_parent >= 0) {
-				int new_level = max_parent + 1;
-				if (new_level != node->level) {
-					node->level = new_level;
-					changed = true;
-				}
-			}
-		}
-	}
+	RecomputeDAGLevels(all_nodes);
 
 	return all_nodes;
 }
@@ -776,40 +755,16 @@ void RobustOptimizerContextState::FlipRootsToLeaves(vector<PhysicalDAGNode *> &a
 				reversed.parent_cols = edge.child_cols;
 				reversed.child_cols = edge.parent_cols;
 				node->edges_to_parents.push_back(reversed);
+
+				// only mark progress on a real reversal; a childless root cannot
+				// be flipped and must not keep this loop spinning forever
+				flipped = true;
 			}
-			flipped = true;
 		}
 	}
 
 	// step 4: recompute levels
-	for (auto *node : all_nodes) {
-		node->level = node->parents.empty() ? 0 : -1;
-	}
-	bool changed = true;
-	while (changed) {
-		changed = false;
-		for (auto *node : all_nodes) {
-			if (node->parents.empty()) {
-				continue;
-			}
-			int max_parent = -1;
-			bool all_set = true;
-			for (auto *p : node->parents) {
-				if (p->level < 0) {
-					all_set = false;
-					break;
-				}
-				max_parent = std::max(max_parent, p->level);
-			}
-			if (all_set && max_parent >= 0) {
-				int new_level = max_parent + 1;
-				if (new_level != node->level) {
-					node->level = new_level;
-					changed = true;
-				}
-			}
-		}
-	}
+	RecomputeDAGLevels(all_nodes);
 }
 
 void RobustOptimizerContextState::PrintPhysicalPlanDAG(LogicalOperator *op) {

@@ -755,15 +755,15 @@ void PhysicalCreateFilter::BuildPipelines(Pipeline &current, MetaPipeline &meta_
 	state.SetPipelineSource(current, *this);
 
 	if (this_pipeline == nullptr) {
-		D_PRINTF("[PIPELINE] CREATE_FILTER (build=%s) creating NEW child pipeline for build-side", build_table.c_str());
+		// D_PRINTF("[PIPELINE] CREATE_FILTER (build=%s) creating NEW child pipeline for build-side", build_table.c_str());
 		auto &child_meta_pipeline = meta_pipeline.CreateChildMetaPipeline(current, *this);
 		this_pipeline = child_meta_pipeline.GetBasePipeline();
 		// CreateChildMetaPipeline() automatically registers the child pipeline as a dependency
 		child_meta_pipeline.Build(children[0].get());
-		D_PRINTF("[PIPELINE] CREATE_FILTER (build=%s) child pipeline created", build_table.c_str());
+		// D_PRINTF("[PIPELINE] CREATE_FILTER (build=%s) child pipeline created", build_table.c_str());
 	} else {
-		D_PRINTF("[PIPELINE] CREATE_FILTER (build=%s) adding existing child pipeline as dependency",
-		         build_table.c_str());
+		// D_PRINTF("[PIPELINE] CREATE_FILTER (build=%s) adding existing child pipeline as dependency",
+		         // build_table.c_str());
 		current.AddDependency(this_pipeline);
 	}
 }
