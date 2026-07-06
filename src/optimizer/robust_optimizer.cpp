@@ -106,8 +106,7 @@ void RobustOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &pla
 			if (op->expressions[i]->type == ExpressionType::BOUND_COLUMN_REF) {
 				auto &col_ref = op->expressions[i]->Cast<BoundColumnRefExpression>();
 				rename_col_bindings.insert({old_refs[i], col_ref.binding});
-			}
-			else if (op->expressions[i]->type == ExpressionType::BOUND_FUNCTION) {
+			} else if (op->expressions[i]->type == ExpressionType::BOUND_FUNCTION) {
 				auto &func_ref = op->expressions[i]->Cast<BoundFunctionExpression>();
 				for (const auto &arg : func_ref.children) {
 					if (arg->type == ExpressionType::BOUND_COLUMN_REF) {
@@ -601,8 +600,7 @@ static int DFSIndexOf(const map<idx_t, int> &dfs_index, idx_t table) {
 // (first-executed = lowest index, last-executed = highest index)
 static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RobustOptimizerContextState &state,
                            vector<PhysicalDAGNode *> &all_nodes, map<idx_t, PhysicalDAGNode *> &node_map,
-                           map<idx_t, int> &dfs_index, map<ColKey, ColKey> &uf_parent,
-                           vector<RawDAGCond> &raw_conds) {
+                           map<idx_t, int> &dfs_index, map<ColKey, ColKey> &uf_parent, vector<RawDAGCond> &raw_conds) {
 	if (!op) {
 		return;
 	}
@@ -631,7 +629,8 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RobustO
 		auto &join = op->Cast<LogicalComparisonJoin>();
 
 		if (join.join_type == JoinType::MARK) {
-			PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent, raw_conds);
+			PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent,
+			               raw_conds);
 			return;
 		}
 
