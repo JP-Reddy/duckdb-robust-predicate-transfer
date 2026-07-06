@@ -528,6 +528,12 @@ static void AddOrMergeDAGEdge(PhysicalDAGNode *parent_node, PhysicalDAGNode *chi
                               const ColumnBinding &parent_col, const ColumnBinding &child_col) {
 	for (auto &edge : child_node->edges_to_parents) {
 		if (edge.parent_table == parent_node->table_idx) {
+			// multi-column join: append columns, skipping exact duplicates
+			for (idx_t i = 0; i < edge.parent_cols.size(); i++) {
+				if (edge.parent_cols[i] == parent_col && edge.child_cols[i] == child_col) {
+					return;
+				}
+			}
 			edge.parent_cols.push_back(parent_col);
 			edge.child_cols.push_back(child_col);
 			return;
@@ -576,12 +582,27 @@ static void RecomputeDAGLevels(vector<PhysicalDAGNode *> &all_nodes) {
 	}
 }
 
+// raw equality condition captured during DFS, before equivalence rerouting.
+// used afterwards to reconnect tables the rerouting left without any edge.
+// table indices are derivable as col_a/col_b .table_index
+struct RawDAGCond {
+	ColumnBinding col_a;
+	ColumnBinding col_b;
+};
+
+// dfs_index lookup with a defensive default for unregistered tables
+static int DFSIndexOf(const map<idx_t, int> &dfs_index, idx_t table) {
+	auto it = dfs_index.find(table);
+	return it == dfs_index.end() ? -1 : it->second;
+}
+
 // recursive DFS for building physical DAG
 // uses build-first traversal so DFS index matches execution order
 // (first-executed = lowest index, last-executed = highest index)
 static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RobustOptimizerContextState &state,
                            vector<PhysicalDAGNode *> &all_nodes, map<idx_t, PhysicalDAGNode *> &node_map,
-                           map<idx_t, int> &dfs_index, map<ColKey, ColKey> &uf_parent) {
+                           map<idx_t, int> &dfs_index, map<ColKey, ColKey> &uf_parent,
+                           vector<RawDAGCond> &raw_conds) {
 	if (!op) {
 		return;
 	}
@@ -610,14 +631,14 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RobustO
 		auto &join = op->Cast<LogicalComparisonJoin>();
 
 		if (join.join_type == JoinType::MARK) {
-			PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
+			PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent, raw_conds);
 			return;
 		}
 
 		// build-first: visit right child (build) first, then left child (probe)
 		// this gives execution order: first-executed tables get lowest DFS index
-		PhysicalDAGDFS(op->children[1].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
-		PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
+		PhysicalDAGDFS(op->children[1].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent, raw_conds);
+		PhysicalDAGDFS(op->children[0].get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent, raw_conds);
 
 		// process each join condition
 		for (const JoinCondition &cond : join.conditions) {
@@ -648,36 +669,70 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RobustO
 				continue;
 			}
 
-			int idx_a = dfs_index.count(table_a) ? dfs_index[table_a] : -1;
-			int idx_b = dfs_index.count(table_b) ? dfs_index[table_b] : -1;
+			int idx_a = DFSIndexOf(dfs_index, table_a);
+			int idx_b = DFSIndexOf(dfs_index, table_b);
 
 			// higher DFS index = later execution = parent (closer to root/top)
 			idx_t parent_idx, child_idx;
+			int child_dfs;
 			ColumnBinding parent_col, child_col;
 			if (idx_a > idx_b) {
 				parent_idx = table_a;
 				parent_col = left_resolved;
 				child_idx = table_b;
 				child_col = right_resolved;
+				child_dfs = idx_b;
 			} else {
 				parent_idx = table_b;
 				parent_col = right_resolved;
 				child_idx = table_a;
 				child_col = left_resolved;
+				child_dfs = idx_a;
 			}
 
-			// connect the two tables named by this condition directly.
-			// UFUnion above records the equivalence class for downstream stage
-			// generation; edges here must stay 1:1 with join conditions so the
-			// DAG remains a connected spanning structure over the base tables.
-			AddOrMergeDAGEdge(node_map[parent_idx], node_map[child_idx], parent_col, child_col);
+			// remember the raw condition so orphaned tables can be reconnected later.
+			// must stay below the node_map checks above: the orphan post-pass relies
+			// on every recorded condition having produced a parent-side edge, which
+			// guarantees reconnection always attaches to the main DAG (no islands)
+			raw_conds.push_back({left_resolved, right_resolved});
+
+			// equiv resolution on child side: find shallowest equivalent (highest DFS, != parent)
+			// this chains edges along execution order within an equivalence class
+			ColKey child_root = UFFind(uf_parent, {child_col.table_index, child_col.column_index});
+			idx_t best_child = child_idx;
+			int best_child_dfs = child_dfs;
+			ColumnBinding best_child_col = child_col;
+
+			// UFFind only mutates mapped values of existing keys (path compression),
+			// so iterating uf_parent directly is safe
+			for (auto &entry : uf_parent) {
+				ColKey key = entry.first;
+				if (UFFind(uf_parent, key) != child_root) {
+					continue;
+				}
+				idx_t candidate = key.first;
+				if (candidate == parent_idx) {
+					continue;
+				}
+				if (!node_map.count(candidate)) {
+					continue;
+				}
+				int candidate_dfs = DFSIndexOf(dfs_index, candidate);
+				if (candidate_dfs > best_child_dfs) {
+					best_child = candidate;
+					best_child_dfs = candidate_dfs;
+					best_child_col = ColumnBinding(key.first, key.second);
+				}
+			}
+
+			AddOrMergeDAGEdge(node_map[parent_idx], node_map[best_child], parent_col, best_child_col);
 		}
 		return;
 	}
 
 	// other operators: recurse into children
 	for (auto &child : op->children) {
-		PhysicalDAGDFS(child.get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent);
+		PhysicalDAGDFS(child.get(), table_mgr, state, all_nodes, node_map, dfs_index, uf_parent, raw_conds);
 	}
 }
 
@@ -686,8 +741,56 @@ vector<PhysicalDAGNode *> RobustOptimizerContextState::BuildPhysicalPlanDAG(Logi
 	vector<PhysicalDAGNode *> all_nodes;
 	map<idx_t, PhysicalDAGNode *> node_map;
 	map<idx_t, int> dfs_index;
+	vector<RawDAGCond> raw_conds;
 
-	PhysicalDAGDFS(op, table_mgr, *this, all_nodes, node_map, dfs_index, uf_parent);
+	PhysicalDAGDFS(op, table_mgr, *this, all_nodes, node_map, dfs_index, uf_parent, raw_conds);
+
+	// reconnect orphans: equivalence rerouting can collapse a table's only
+	// condition onto an existing edge, leaving it with no edges at all.
+	// link such tables directly via one of their raw conditions, preferring
+	// the counterpart that executes latest (highest DFS index).
+	for (auto *node : all_nodes) {
+		if (!node->parents.empty() || !node->children.empty()) {
+			continue;
+		}
+		bool found = false;
+		int best_dfs = -1;
+		idx_t best_other = 0;
+		ColumnBinding best_node_col, best_other_col;
+		for (auto &rc : raw_conds) {
+			// normalize so node_col is always this node's side
+			ColumnBinding node_col, other_col;
+			if (rc.col_a.table_index == node->table_idx) {
+				node_col = rc.col_a;
+				other_col = rc.col_b;
+			} else if (rc.col_b.table_index == node->table_idx) {
+				node_col = rc.col_b;
+				other_col = rc.col_a;
+			} else {
+				continue;
+			}
+			idx_t other = other_col.table_index;
+			if (!node_map.count(other)) {
+				continue;
+			}
+			int other_dfs = DFSIndexOf(dfs_index, other);
+			if (other_dfs > best_dfs) {
+				found = true;
+				best_dfs = other_dfs;
+				best_other = other;
+				best_node_col = node_col;
+				best_other_col = other_col;
+			}
+		}
+		if (!found) {
+			continue;
+		}
+		if (best_dfs > DFSIndexOf(dfs_index, node->table_idx)) {
+			AddOrMergeDAGEdge(node_map[best_other], node, best_other_col, best_node_col);
+		} else {
+			AddOrMergeDAGEdge(node, node_map[best_other], best_node_col, best_other_col);
+		}
+	}
 
 	RecomputeDAGLevels(all_nodes);
 
