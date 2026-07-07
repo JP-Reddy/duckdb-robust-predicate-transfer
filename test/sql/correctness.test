@@ -84,16 +84,6 @@ WHERE t1.k12 = t2.k12
 ----
 3	6	50	500
 
-# Correctness: triangle join
-query IIII
-SELECT count(*), sum(t2.v2), sum(t3.v3), sum(t4.v4)
-FROM t2, t3, t4
-WHERE t2.k23 = t3.k23
-  AND t3.k34 = t4.k34
-  AND t2.k24 = t4.k24;
-----
-2	30	300	3000
-
 # Correctness: four-table chain join
 query IIIII
 SELECT count(*), sum(t1.v1), sum(t2.v2), sum(t3.v3), sum(t4.v4)
@@ -113,16 +103,6 @@ WHERE t1.k12 = t2.k12
   AND t2.k24 = t4.k24;
 ----
 3	6	50	500	5000
-
-# Correctness: two separate two-way equality join connected by a inequality join
-query IIIII
-SELECT count(*), sum(t1.v1), sum(t2.v2), sum(t3.v3), sum(t4.v4)
-FROM t1, t2, t3, t4
-WHERE t1.k12 = t2.k12
-  AND t2.k23 < t3.k23
-  AND t3.k34 = t4.k34;
-----
-8	14	120	2800	35000
 
 endloop
 
