@@ -11,6 +11,9 @@
 #include <vector>
 #include <algorithm>
 #include <map>
+#ifdef _WIN32
+#include "duckdb/common/windows.hpp"
+#endif
 
 namespace duckdb {
 
@@ -51,20 +54,32 @@ struct ScopedTimer {
 };
 
 // RAII timer that adds elapsed *thread CPU* microseconds to an atomic counter.
-// uses CLOCK_THREAD_CPUTIME_ID so the measurement reflects work actually executed and
-// is not inflated by thread descheduling/contention (which wall-clock would capture).
+// uses CLOCK_THREAD_CPUTIME_ID (posix) / GetThreadTimes (windows) so the measurement reflects
+// work actually executed and is not inflated by thread descheduling/contention (which
+// wall-clock would capture). note: windows granularity is coarse (~15ms scheduler tick).
 struct ScopedCpuTimer {
 	std::atomic<int64_t> &target;
-	timespec start;
+	int64_t start_us;
 
-	explicit ScopedCpuTimer(std::atomic<int64_t> &target) : target(target) {
-		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+	static int64_t ThreadCpuUs() {
+#ifdef _WIN32
+		FILETIME creation_time, exit_time, kernel_time, user_time;
+		GetThreadTimes(GetCurrentThread(), &creation_time, &exit_time, &kernel_time, &user_time);
+		auto to_us = [](const FILETIME &ft) {
+			return ((static_cast<int64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime) / 10;
+		};
+		return to_us(kernel_time) + to_us(user_time);
+#else
+		timespec ts;
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+		return ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
+#endif
+	}
+
+	explicit ScopedCpuTimer(std::atomic<int64_t> &target) : target(target), start_us(ThreadCpuUs()) {
 	}
 	~ScopedCpuTimer() {
-		timespec end;
-		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-		int64_t us = (end.tv_sec - start.tv_sec) * 1000000LL + (end.tv_nsec - start.tv_nsec) / 1000;
-		target.fetch_add(us, std::memory_order_relaxed);
+		target.fetch_add(ThreadCpuUs() - start_us, std::memory_order_relaxed);
 	}
 };
 
