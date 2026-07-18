@@ -67,15 +67,28 @@ if [ "$DISABLE_TIMEOUT" = true ]; then
     RUNNER_FLAGS+=(--disable-timeout)
 fi
 
+# run each query in its own runner process: a hung/killed benchmark would
+# otherwise take down the runner and skip every query after it
+run_suite() {
+    local suite="$1" raw="$2"
+    : > "$raw"
+    local bfile name
+    for bfile in "$PROJECT_ROOT/bench_suites/$suite"/q*.benchmark; do
+        name="$(basename "$bfile")"
+        echo "$name" | grep -qE "$PATTERN" || continue
+        "$RUNNER" "${RUNNER_FLAGS[@]}" "benchmark/$suite/$name" 2>&1 | tee -a "$raw" || true
+    done
+}
+
 if [ "$RUN_BASELINE" = true ]; then
     echo "Running TPCH baseline benchmarks (pattern: $PATTERN)..."
-    "$RUNNER" "${RUNNER_FLAGS[@]}" "benchmark/tpch_baseline/$PATTERN" 2>&1 | tee "$BASELINE_RAW"
+    run_suite tpch_baseline "$BASELINE_RAW"
     echo "Baseline done."
 fi
 
 if [ "$RUN_ROBUST" = true ]; then
     echo "Running TPCH Robust benchmarks (pattern: $PATTERN)..."
-    "$RUNNER" "${RUNNER_FLAGS[@]}" "benchmark/tpch_robust/$PATTERN" 2>&1 | tee "$ROBUST_RAW"
+    run_suite tpch_robust "$ROBUST_RAW"
     echo "Robust done."
 fi
 
