@@ -47,7 +47,8 @@ idx_t TableManager::GetScalarTableIndex(LogicalOperator *op) {
 	case LogicalOperatorType::LOGICAL_PROJECTION:
 	case LogicalOperatorType::LOGICAL_UNION:
 	case LogicalOperatorType::LOGICAL_EXCEPT:
-	case LogicalOperatorType::LOGICAL_INTERSECT: {
+	case LogicalOperatorType::LOGICAL_INTERSECT:
+	case LogicalOperatorType::LOGICAL_CTE_REF: {
 		return op->GetTableIndex()[0];
 	}
 	case LogicalOperatorType::LOGICAL_FILTER: {

@@ -2,6 +2,7 @@
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
+#include "duckdb/planner/operator/logical_cteref.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/common/types.hpp"
 #include "table_manager.hpp"
@@ -138,6 +139,7 @@ void RobustOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &pla
 	case LogicalOperatorType::LOGICAL_GET:
 	case LogicalOperatorType::LOGICAL_EMPTY_RESULT:
 	case LogicalOperatorType::LOGICAL_CHUNK_GET:
+	case LogicalOperatorType::LOGICAL_CTE_REF:
 		D_PRINTF("[NODE_REG] Registering base table scan, type=%d", (int)op->type);
 		table_mgr.AddTableOperator(op);
 		return;
@@ -613,7 +615,7 @@ static void PhysicalDAGDFS(LogicalOperator *op, TableManager &table_mgr, RobustO
 		     op->type == LogicalOperatorType::LOGICAL_EXPRESSION_GET ||
 		     op->type == LogicalOperatorType::LOGICAL_DELIM_GET ||
 		     op->type == LogicalOperatorType::LOGICAL_EMPTY_RESULT ||
-		     op->type == LogicalOperatorType::LOGICAL_CHUNK_GET);
+		     op->type == LogicalOperatorType::LOGICAL_CHUNK_GET || op->type == LogicalOperatorType::LOGICAL_CTE_REF);
 		if (is_leaf) {
 			auto *node = new PhysicalDAGNode(info->table_idx, info->table_op);
 			all_nodes.push_back(node);
