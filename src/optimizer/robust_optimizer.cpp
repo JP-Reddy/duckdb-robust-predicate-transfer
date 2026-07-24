@@ -1571,12 +1571,15 @@ void RobustOptimizerContextState::SetupDynamicFilterPushdown(LogicalOperator *pl
 static LogicalOperator *FindDeepestCreateFilter(LogicalOperator *node) {
 	LogicalOperator *deepest = nullptr;
 	while (node) {
+		if (node->children.empty()) {
+			break;
+		}
+		if (node->children.size() != 1 || node->GetColumnBindings() != node->children[0]->GetColumnBindings()) {
+			break;
+		}
 		if (node->type == LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR &&
 		    dynamic_cast<LogicalCreateFilter *>(node)) {
 			deepest = node;
-		}
-		if (node->children.empty()) {
-			break;
 		}
 		node = node->children[0].get();
 	}
