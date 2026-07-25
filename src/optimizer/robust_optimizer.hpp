@@ -45,6 +45,12 @@ struct PhysicalDAGNode {
 	}
 };
 
+struct Component {
+	vector<PhysicalDAGNode *> comp_nodes;
+	vector<PhysicalDAGNode *> roots;
+	PhysicalDAGNode *anchor;
+};
+
 // column key for equivalence class union-find
 using ColKey = std::pair<idx_t, idx_t>; // (table_idx, column_idx)
 
