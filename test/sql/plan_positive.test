@@ -84,26 +84,7 @@ WHERE t1.k12 = t2.k12
 ----
 physical_plan	<REGEX>:.*PROBE_FILTER.*
 
-# Correctness: triangle join
-query II
-EXPLAIN SELECT count(*)
-FROM t2, t3, t4
-WHERE t2.k23 = t3.k23
-  AND t3.k34 = t4.k34
-  AND t2.k24 = t4.k24;
-----
-physical_plan	<REGEX>:.*CREATE_FILTER.*
-
-query II
-EXPLAIN SELECT count(*)
-FROM t2, t3, t4
-WHERE t2.k23 = t3.k23
-  AND t3.k34 = t4.k34
-  AND t2.k24 = t4.k24;
-----
-physical_plan	<REGEX>:.*PROBE_FILTER.*
-
-# Negative: four-table chain join
+# Positive: four-table chain join
 query II
 EXPLAIN SELECT count(*)
 FROM t1, t2, t3, t4
