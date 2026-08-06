@@ -31,7 +31,7 @@ if [ -z "$(ls -A "$PROJECT_ROOT/tpchdata/queries"/q*.sql 2>/dev/null)" ]; then
 fi
 
 RUNNER="$PROJECT_ROOT/build/release/benchmark/benchmark_runner"
-PATTERN="q(02|03|07|08|10|11|17|18|21)\.benchmark"
+PATTERN="q(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22)\.benchmark"
 RUN_BASELINE=true
 RUN_ROBUST=true
 OUT_DIR="$PROJECT_ROOT/benchmark_results/tpch"

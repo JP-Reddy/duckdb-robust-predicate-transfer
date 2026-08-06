@@ -1,0 +1,7 @@
+# name: benchmark/tpch_baseline/q01.benchmark
+# description: Run TPCH query 01 (baseline, single-threaded)
+# group: [tpch_baseline]
+
+template benchmark/tpch_baseline/tpch_baseline.benchmark.in
+QUERY_NUMBER=1
+QUERY_NUMBER_PADDED=01
