@@ -1,0 +1,7 @@
+# name: benchmark/tpch_robust/q20.benchmark
+# description: Run TPCH query 20 with Robust extension (single-threaded)
+# group: [tpch_robust]
+
+template benchmark/tpch_robust/tpch_robust.benchmark.in
+QUERY_NUMBER=20
+QUERY_NUMBER_PADDED=20
