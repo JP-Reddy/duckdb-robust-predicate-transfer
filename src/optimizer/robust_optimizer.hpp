@@ -45,7 +45,7 @@ struct PhysicalDAGNode {
 	}
 };
 
-struct Component {
+struct PhysicalDAGComponent {
 	vector<PhysicalDAGNode *> comp_nodes;
 	vector<PhysicalDAGNode *> roots;
 	PhysicalDAGNode *anchor;
