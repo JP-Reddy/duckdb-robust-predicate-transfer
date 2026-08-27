@@ -800,7 +800,7 @@ vector<PhysicalDAGNode *> RobustOptimizerContextState::BuildPhysicalPlanDAG(Logi
 
 void RobustOptimizerContextState::FlipRootsToLeaves(vector<PhysicalDAGNode *> &all_nodes) {
 	unordered_map<idx_t, bool> visited;
-	vector<Component> components;
+	vector<PhysicalDAGComponent> components;
 	for (auto *node : all_nodes) {
 		// step 1: find all roots
 		if (visited.count(node->table_idx)) {
