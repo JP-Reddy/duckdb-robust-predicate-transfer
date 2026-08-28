@@ -175,8 +175,29 @@ ColumnBinding RobustOptimizerContextState::ResolveColumnBinding(const ColumnBind
 	return current;
 }
 
+static idx_t TableUFFind(unordered_map<idx_t, idx_t> &parent, idx_t x) {
+	if (parent.find(x) == parent.end()) {
+		parent[x] = x;
+	}
+	while (parent[x] != x) {
+		parent[x] = parent[parent[x]];
+		x = parent[x];
+	}
+	return x;
+}
+
+static void TableUFUnion(unordered_map<idx_t, idx_t> &parent, idx_t a, idx_t b) {
+	a = TableUFFind(parent, a);
+	b = TableUFFind(parent, b);
+	if (a != b) {
+		parent[a] = b;
+	}
+}
+
 vector<JoinEdge> RobustOptimizerContextState::CreateJoinEdges(vector<LogicalOperator *> &join_ops) {
 	vector<JoinEdge> edges;
+	unordered_map<idx_t, idx_t> table_parent;
+	set<pair<idx_t, idx_t>> seen_pairs;
 	for (auto &op : join_ops) {
 		auto &join = op->Cast<LogicalComparisonJoin>();
 
@@ -215,6 +236,26 @@ vector<JoinEdge> RobustOptimizerContextState::CreateJoinEdges(vector<LogicalOper
 			} else {
 				D_PRINTF("WARNING: Resolved table indices (%llu, %llu) not found in table_lookup",
 				         (unsigned long long)left_table_idx, (unsigned long long)right_table_idx);
+				continue;
+			}
+			for (idx_t i = 0; i < resolved_left_columns.size(); i++) {
+				auto u = resolved_left_columns[i].table_index;
+				auto v = resolved_right_columns[i].table_index;
+				if (u > v) {
+					std::swap(u, v);
+				}
+				if (!seen_pairs.count({u, v})) {
+					if (TableUFFind(table_parent, u) == TableUFFind(table_parent, v)) {
+						exist_cycle = true;
+						break;
+					} else {
+						seen_pairs.insert({u, v});
+						TableUFUnion(table_parent, u, v);
+					}
+				}
+			}
+			if (exist_cycle) {
+				break;
 			}
 		}
 	}
@@ -794,42 +835,6 @@ vector<PhysicalDAGNode *> RobustOptimizerContextState::BuildPhysicalPlanDAG(Logi
 	RecomputeDAGLevels(all_nodes);
 
 	return all_nodes;
-}
-
-bool ExistCycle(vector<PhysicalDAGNode *> &all_nodes) {
-	unordered_map<idx_t, bool> visited;
-	for (auto *node : all_nodes) {
-		if (visited.count(node->table_idx)) {
-			continue;
-		}
-		idx_t cntNodes = 0;
-		idx_t cntEdges = 0;
-		vector<PhysicalDAGNode *> que;
-		auto discover = [&](PhysicalDAGNode *candidate) {
-			if (visited.count(candidate->table_idx)) {
-				return;
-			}
-			visited[candidate->table_idx] = true;
-			que.push_back(candidate);
-			cntNodes++;
-			cntEdges += candidate->parents.size() + candidate->children.size();
-		};
-		discover(node);
-		while (!que.empty()) {
-			auto cur = que.back();
-			que.pop_back();
-			for (auto &child : cur->children) {
-				discover(child);
-			}
-			for (auto &parent : cur->parents) {
-				discover(parent);
-			}
-		}
-		if (cntEdges / 2 >= cntNodes) {
-			return true;
-		}
-	}
-	return false;
 }
 
 void RobustOptimizerContextState::FlipRootsToLeaves(vector<PhysicalDAGNode *> &all_nodes) {
@@ -1698,6 +1703,11 @@ unique_ptr<LogicalOperator> RobustOptimizerContextState::Optimize(unique_ptr<Log
 		return plan;
 	}
 
+	if (exist_cycle) {
+		D_PRINTF("Cycle Detected");
+		return plan;
+	}
+
 	// display physical plan DAG if enabled (before we modify the plan)
 	PrintPhysicalPlanDAG(plan.get());
 
@@ -1715,10 +1725,6 @@ unique_ptr<LogicalOperator> RobustOptimizerContextState::Optimize(unique_ptr<Log
 		map<ColKey, ColKey> uf_parent;
 		auto all_nodes = BuildPhysicalPlanDAG(plan.get(), uf_parent);
 
-		if (ExistCycle(all_nodes)) {
-			D_PRINTF("Cycle Detected");
-			return plan;
-		}
 		// flip non-largest roots to leaves (default: on)
 		Value flip_val;
 		bool flip_roots = true;
