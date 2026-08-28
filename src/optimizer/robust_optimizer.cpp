@@ -177,8 +177,29 @@ ColumnBinding RobustOptimizerContextState::ResolveColumnBinding(const ColumnBind
 	return current;
 }
 
+static idx_t TableUFFind(unordered_map<idx_t, idx_t> &parent, idx_t x) {
+	if (parent.find(x) == parent.end()) {
+		parent[x] = x;
+	}
+	while (parent[x] != x) {
+		parent[x] = parent[parent[x]];
+		x = parent[x];
+	}
+	return x;
+}
+
+static void TableUFUnion(unordered_map<idx_t, idx_t> &parent, idx_t a, idx_t b) {
+	a = TableUFFind(parent, a);
+	b = TableUFFind(parent, b);
+	if (a != b) {
+		parent[a] = b;
+	}
+}
+
 vector<JoinEdge> RobustOptimizerContextState::CreateJoinEdges(vector<LogicalOperator *> &join_ops) {
 	vector<JoinEdge> edges;
+	unordered_map<idx_t, idx_t> table_parent;
+	set<pair<idx_t, idx_t>> seen_pairs;
 	for (auto &op : join_ops) {
 		auto &join = op->Cast<LogicalComparisonJoin>();
 
@@ -217,6 +238,26 @@ vector<JoinEdge> RobustOptimizerContextState::CreateJoinEdges(vector<LogicalOper
 			} else {
 				D_PRINTF("WARNING: Resolved table indices (%llu, %llu) not found in table_lookup",
 				         (unsigned long long)left_table_idx, (unsigned long long)right_table_idx);
+				continue;
+			}
+			for (idx_t i = 0; i < resolved_left_columns.size(); i++) {
+				auto u = resolved_left_columns[i].table_index;
+				auto v = resolved_right_columns[i].table_index;
+				if (u > v) {
+					std::swap(u, v);
+				}
+				if (!seen_pairs.count({u, v})) {
+					if (TableUFFind(table_parent, u) == TableUFFind(table_parent, v)) {
+						exist_cycle = true;
+						break;
+					} else {
+						seen_pairs.insert({u, v});
+						TableUFUnion(table_parent, u, v);
+					}
+				}
+			}
+			if (exist_cycle) {
+				break;
 			}
 		}
 	}
@@ -1702,6 +1743,11 @@ unique_ptr<LogicalOperator> RobustOptimizerContextState::Optimize(unique_ptr<Log
 
 	D_PRINTF("Edges size: %zu", edges.size());
 	if (edges.size() <= 1) {
+		return plan;
+	}
+
+	if (exist_cycle) {
+		D_PRINTF("Cycle Detected");
 		return plan;
 	}
 

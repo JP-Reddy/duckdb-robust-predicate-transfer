@@ -71,6 +71,8 @@ public:
 
 	unordered_map<ColumnBinding, ColumnBinding, ColumnBindingHashFunction> rename_col_bindings;
 
+	bool exist_cycle = false;
+
 public:
 	// extract all the join edges from the plan
 	// vector<JoinEdge> ExtractOperators(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
