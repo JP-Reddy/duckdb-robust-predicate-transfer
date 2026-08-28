@@ -1583,7 +1583,7 @@ static LogicalOperator *FindDeepestCreateFilter(LogicalOperator *node) {
 	return deepest;
 }
 
-// find the deepest FILTER chain starting with a PROBE_FILTER
+// find the deepest CREATE/PROBE FILTER chain starting with a CREATE_FILTER
 static pair<LogicalOperator *, LogicalOperator *> FindDeepestFilterChain(LogicalOperator *node) {
 	LogicalOperator *deepest = nullptr;
 	LogicalOperator *parent = nullptr;
@@ -1666,6 +1666,8 @@ void RobustOptimizerContextState::LiftCreateFilterAboveFilter(unique_ptr<Logical
 	if (!parent || !create) {
 		return;
 	}
+
+	// lift the CREATE/PROBE FILTER chain above LOGICAL_FILTER and remap the column bindings
 	auto beginning = std::move(parent->children[0]);
 	parent->children[0] = std::move(create->children[0]);
 	create->children[0] = (std::move(plan));
