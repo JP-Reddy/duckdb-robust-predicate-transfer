@@ -1099,7 +1099,8 @@ RobustOptimizerContextState::GenerateStageModifications(const vector<JoinEdge> &
 std::pair<unordered_map<LogicalOperator *, vector<FilterOperation>>,
           unordered_map<LogicalOperator *, vector<FilterOperation>>>
 RobustOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDAGNode *> &all_nodes,
-                                                               map<ColKey, ColKey> &uf_parent) {
+                                                               map<ColKey, ColKey> &uf_parent,
+                                                               vector<FilterOpPair> &filter_pairs) {
 	unordered_map<LogicalOperator *, vector<FilterOperation>> forward_filter_ops;
 	unordered_map<LogicalOperator *, vector<FilterOperation>> backward_filter_ops;
 
@@ -1165,6 +1166,7 @@ RobustOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDA
 				use_op.is_forward_pass = true;
 				use_op.sequence_number = sequence++;
 				forward_filter_ops[parent_node->table_op].push_back(use_op);
+				filter_pairs.push_back({create_op, use_op});
 			}
 		}
 	}
@@ -1228,6 +1230,7 @@ RobustOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDA
 					use_op.is_forward_pass = false;
 					use_op.sequence_number = sequence++;
 					backward_filter_ops[child_node->table_op].push_back(use_op);
+					filter_pairs.push_back({create_op, use_op});
 				} else {
 					// new equivalence class at this edge — create BF on parent, use on child
 					FilterOperation create_op;
@@ -1251,6 +1254,7 @@ RobustOptimizerContextState::GenerateStageModificationsFromDAG(vector<PhysicalDA
 					use_op.is_forward_pass = false;
 					use_op.sequence_number = sequence++;
 					backward_filter_ops[child_node->table_op].push_back(use_op);
+					filter_pairs.push_back({create_op, use_op});
 
 					// record this as the source for this equivalence class
 					equiv_class_bf_source[equiv_root] = {parent_node->table_op, create_idx, parent_node->table_idx,
@@ -1686,6 +1690,74 @@ void RobustOptimizerContextState::LiftCreateFilterAboveFilter(unique_ptr<Logical
 	plan = std::move(block);
 }
 
+static FilterOperation *FindOperation(unordered_map<LogicalOperator *, vector<FilterOperation>> &filter_ops,
+                                      idx_t sequence_number) {
+	for (auto &entry : filter_ops) {
+		auto &table_op = entry.first;
+		auto &ops = entry.second;
+		for (auto &op : ops) {
+			if (op.sequence_number == sequence_number) {
+				return &op;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+static void EraseOperation(unordered_map<LogicalOperator *, vector<FilterOperation>> &filter_ops,
+                           idx_t sequence_number) {
+	for (auto map_it = filter_ops.begin(); map_it != filter_ops.end(); map_it++) {
+		auto &ops = map_it->second;
+		for (auto op_it = ops.begin(); op_it != ops.end(); op_it++) {
+			if (op_it->sequence_number != sequence_number) {
+				continue;
+			}
+			ops.erase(op_it);
+			if (ops.empty()) {
+				filter_ops.erase(map_it);
+			}
+			return;
+		}
+	}
+}
+
+static void RemoveFilterPair(const FilterOpPair &pair,
+                             unordered_map<LogicalOperator *, vector<FilterOperation>> &forward_filter_ops,
+                             unordered_map<LogicalOperator *, vector<FilterOperation>> &backward_filter_ops) {
+	auto &filter_ops = pair.create_op.is_forward_pass ? forward_filter_ops : backward_filter_ops;
+
+	if (pair.create_op.is_forward_pass) {
+		EraseOperation(filter_ops, pair.create_op.sequence_number);
+		EraseOperation(filter_ops, pair.probe_op.sequence_number);
+		return;
+	}
+
+	// if backward pass, CREATE needs to be partially deleted
+	auto *create_op = FindOperation(filter_ops, pair.create_op.sequence_number);
+	for (const auto &target_probe : pair.probe_op.probe_columns) {
+		for (idx_t i = 0; i < create_op->probe_columns.size(); i++) {
+			const auto &current_probe = create_op->probe_columns[i];
+
+			if (current_probe.table_index != target_probe.table_index ||
+			    current_probe.column_index != target_probe.column_index) {
+				continue;
+			}
+
+			create_op->build_columns.erase(create_op->build_columns.begin() + (int)i);
+			create_op->probe_columns.erase(create_op->probe_columns.begin() + (int)i);
+			break;
+		}
+	}
+
+	EraseOperation(filter_ops, pair.probe_op.sequence_number);
+
+	// if CREATE is empty, delete it
+	if (create_op->probe_columns.empty()) {
+		EraseOperation(filter_ops, pair.create_op.sequence_number);
+	}
+}
+
 unique_ptr<LogicalOperator> RobustOptimizerContextState::PreOptimize(unique_ptr<LogicalOperator> plan) {
 	// step 1: extract join operators
 	vector<JoinEdge> edges = ExtractOperators(*plan);
@@ -1721,6 +1793,7 @@ unique_ptr<LogicalOperator> RobustOptimizerContextState::Optimize(unique_ptr<Log
 		// use DuckDB's join order DAG
 		map<ColKey, ColKey> uf_parent;
 		auto all_nodes = BuildPhysicalPlanDAG(plan.get(), uf_parent);
+		vector<FilterOpPair> filter_pairs;
 
 		// flip non-largest roots to leaves (default: on)
 		Value flip_val;
@@ -1738,7 +1811,7 @@ unique_ptr<LogicalOperator> RobustOptimizerContextState::Optimize(unique_ptr<Log
 			PrintPhysicalDAG(all_nodes, table_mgr);
 		}
 
-		auto filter_ops = GenerateStageModificationsFromDAG(all_nodes, uf_parent);
+		auto filter_ops = GenerateStageModificationsFromDAG(all_nodes, uf_parent, filter_pairs);
 		forward_filter_ops = std::move(filter_ops.first);
 		backward_filter_ops = std::move(filter_ops.second);
 	} else {
