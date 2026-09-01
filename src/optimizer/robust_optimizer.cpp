@@ -3,6 +3,7 @@
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_cteref.hpp"
+#include "duckdb/planner/operator/logical_filter.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/common/types.hpp"
 #include "table_manager.hpp"
@@ -19,6 +20,8 @@
 #include "../utils/dag_printer.hpp"
 #include <chrono>
 #include <duckdb/planner/expression/bound_function_expression.hpp>
+#include "duckdb/storage/statistics/base_statistics.hpp"
+#include "duckdb/storage/statistics/numeric_stats.hpp"
 
 namespace duckdb {
 // class LogicalCreateFilter;
@@ -75,7 +78,21 @@ void RobustOptimizerContextState::ExtractOperatorsRecursive(LogicalOperator &pla
 
 	switch (op->type) {
 	case LogicalOperatorType::LOGICAL_FILTER: {
+		auto &logical_filter = op->Cast<LogicalFilter>();
 		LogicalOperator *child = op->children[0].get();
+
+		// record base tables that have LOGICAL_FILTERs
+		if (!logical_filter.expressions.empty()) {
+			auto *current = child;
+			while (current->type != LogicalOperatorType::LOGICAL_GET && current->children.size() == 1) {
+				current = current->children[0].get();
+			}
+			if (current->type == LogicalOperatorType::LOGICAL_GET) {
+				auto table_idx = current->Cast<LogicalGet>().table_index;
+				table_with_filters.insert(table_idx);
+			}
+		}
+
 		if (child->type == LogicalOperatorType::LOGICAL_GET) {
 			table_mgr.AddTableOperator(child);
 			return;
@@ -1722,6 +1739,7 @@ static void EraseOperation(unordered_map<LogicalOperator *, vector<FilterOperati
 	}
 }
 
+// remove selected pair
 static void RemoveFilterPair(const FilterOpPair &pair,
                              unordered_map<LogicalOperator *, vector<FilterOperation>> &forward_filter_ops,
                              unordered_map<LogicalOperator *, vector<FilterOperation>> &backward_filter_ops) {
@@ -1758,6 +1776,195 @@ static void RemoveFilterPair(const FilterOpPair &pair,
 	}
 }
 
+unique_ptr<BaseStatistics> RobustOptimizerContextState::GetColumnStatistics(const ColumnBinding &binding) {
+	auto &table_info = table_mgr.table_lookup[binding.table_index];
+	auto *get = TableManager::FindLogicalGet(table_info.table_op);
+	if (!get) {
+		D_PRINTF("No matching base table found");
+		return nullptr;
+	}
+	auto &column_id = get->GetColumnIds()[binding.column_index];
+
+	if (!get->function.statistics && !get->function.statistics_extended) {
+		return nullptr;
+	}
+	unique_ptr<BaseStatistics> column_statistics;
+	if (get->function.statistics_extended) {
+		TableFunctionGetStatisticsInput input(get->bind_data.get(), column_id);
+		column_statistics = get->function.statistics_extended(context, input);
+	} else {
+		D_ASSERT(get->function.statistics);
+		column_statistics = get->function.statistics(context, get->bind_data.get(), column_id.GetPrimaryIndex());
+	}
+	return column_statistics;
+}
+
+enum class IncomingFilterStatus { NONE, ONE, MULTIPLE };
+
+struct TableFilterState {
+	IncomingFilterStatus status = IncomingFilterStatus::NONE;
+	idx_t source_idx = DConstants::INVALID_INDEX;
+};
+
+bool RobustOptimizerContextState::HasFilteringLocalPredicate(const FilterOpPair &pair) {
+	const auto &pair_op = pair.probe_op;
+	const auto &build_columns = pair_op.build_columns;
+	const auto &probe_columns = pair_op.probe_columns;
+	auto build_table_idx = pair_op.build_table_idx;
+
+	if (table_with_filters.count(build_table_idx)) {
+		return true;
+	}
+
+	auto &table_info = table_mgr.table_lookup[build_table_idx];
+	auto *get = TableManager::FindLogicalGet(table_info.table_op);
+	if (!get) {
+		D_PRINTF("No matching base table found");
+		return true;
+	}
+	auto &column_ids = get->GetColumnIds();
+
+	for (auto &entry : get->table_filters.filters) {
+		auto &filter = *entry.second;
+
+		if (filter.filter_type == TableFilterType::OPTIONAL_FILTER) {
+			continue;
+		}
+
+		idx_t filter_column_index = DConstants::INVALID_INDEX;
+		for (idx_t i = 0; i < column_ids.size(); i++) {
+			if (column_ids[i].GetPrimaryIndex() == entry.first) {
+				filter_column_index = i;
+				break;
+			}
+		}
+		if (filter_column_index == DConstants::INVALID_INDEX) {
+			return true;
+		}
+
+		ColumnBinding filter_binding(build_table_idx, filter_column_index);
+		auto build_stats = GetColumnStatistics(filter_binding);
+		if (!build_stats) {
+			return true;
+		}
+		auto build_result = filter.CheckStatistics(*build_stats);
+		if (build_result == FilterPropagateResult::FILTER_ALWAYS_TRUE) {
+			continue;
+		}
+
+		auto resolved_filter_binding = ResolveColumnBinding(filter_binding);
+		idx_t key_index = DConstants::INVALID_INDEX;
+		for (idx_t i = 0; i < build_columns.size(); i++) {
+			if (ResolveColumnBinding(build_columns[i]) == resolved_filter_binding) {
+				key_index = i;
+				break;
+			}
+		}
+		if (key_index == DConstants::INVALID_INDEX) {
+			return true;
+		}
+		auto probe_binding = ResolveColumnBinding(probe_columns[key_index]);
+		auto probe_stats = GetColumnStatistics(probe_binding);
+		if (!probe_stats) {
+			return true;
+		}
+		auto probe_result = filter.CheckStatistics(*probe_stats);
+		if (probe_result != FilterPropagateResult::FILTER_ALWAYS_TRUE) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool RobustOptimizerContextState::IsRedundant(const FilterOpPair &pair) {
+	const auto &build_columns = pair.probe_op.build_columns;
+	const auto &probe_columns = pair.probe_op.probe_columns;
+
+	for (idx_t i = 0; i < build_columns.size(); ++i) {
+		auto build_stats = GetColumnStatistics(build_columns[i]);
+		auto probe_stats = GetColumnStatistics(probe_columns[i]);
+		if (!build_stats || !probe_stats) {
+			return false;
+		}
+		if (!build_stats->GetType().IsIntegral() || !probe_stats->GetType().IsIntegral()) {
+			return false;
+		}
+		if (!NumericStats::HasMinMax(*build_stats) || !NumericStats::HasMinMax(*probe_stats)) {
+			return false;
+		}
+
+		auto build_min = NumericStats::Min(*build_stats).GetValue<int64_t>();
+		auto build_max = NumericStats::Max(*build_stats).GetValue<int64_t>();
+		auto probe_min = NumericStats::Min(*probe_stats).GetValue<int64_t>();
+		auto probe_max = NumericStats::Max(*probe_stats).GetValue<int64_t>();
+		auto build_ndv = build_stats->GetDistinctCount();
+		auto original_build_range = build_max - build_min + 1;
+		// if build range has holes, then not redundant
+		if (build_ndv != original_build_range) {
+			return false;
+		}
+		// if probe range is outside of build range, then not redundant
+		if (probe_min < build_min || probe_max > build_max) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void RobustOptimizerContextState::RemoveRedundantPairs(
+    vector<FilterOpPair> &filter_pairs, unordered_map<LogicalOperator *, vector<FilterOperation>> &forward_filter_ops,
+    unordered_map<LogicalOperator *, vector<FilterOperation>> &backward_filter_ops) {
+	map<idx_t, TableFilterState> table_states;
+
+	// initialzize status of tables using local predicates
+	for (const auto &entry : table_mgr.table_lookup) {
+		table_states[entry.first] = TableFilterState();
+	}
+	vector<bool> remove_pair(filter_pairs.size(), false);
+
+	// iterate all pairs in sequence to mark removable pairs
+	for (idx_t pair_idx = 0; pair_idx < filter_pairs.size(); pair_idx++) {
+		const auto &pair = filter_pairs[pair_idx];
+		const auto &pair_op = pair.probe_op;
+		auto &build_state = table_states[pair_op.build_table_idx];
+		auto &probe_state = table_states[pair_op.probe_table_idx];
+		bool redundant = false;
+
+		if (build_state.status == IncomingFilterStatus::NONE && !HasFilteringLocalPredicate(pair) &&
+		    IsRedundant(pair)) {
+			redundant = true;
+		}
+
+		// peel from turnaround
+		if (build_state.status == IncomingFilterStatus::ONE && build_state.source_idx == pair_op.probe_table_idx &&
+		    !HasFilteringLocalPredicate(pair) && IsRedundant(pair)) {
+			redundant = true;
+		}
+
+		if (redundant) {
+			remove_pair[pair_idx] = true;
+			continue;
+		}
+
+		if (probe_state.status == IncomingFilterStatus::NONE) {
+			probe_state.status = IncomingFilterStatus::ONE;
+		} else if (probe_state.status == IncomingFilterStatus::ONE) {
+			probe_state.status = IncomingFilterStatus::MULTIPLE;
+		}
+		probe_state.source_idx = pair_op.build_table_idx;
+	}
+
+	for (idx_t pair_idx = 0; pair_idx < filter_pairs.size(); pair_idx++) {
+		if (!remove_pair[pair_idx]) {
+			continue;
+		}
+
+		auto &pair = filter_pairs[pair_idx];
+		// RemoveFilterPair(pair, forward_filter_ops, backward_filter_ops);
+	}
+}
 unique_ptr<LogicalOperator> RobustOptimizerContextState::PreOptimize(unique_ptr<LogicalOperator> plan) {
 	// step 1: extract join operators
 	vector<JoinEdge> edges = ExtractOperators(*plan);
@@ -1814,6 +2021,9 @@ unique_ptr<LogicalOperator> RobustOptimizerContextState::Optimize(unique_ptr<Log
 		auto filter_ops = GenerateStageModificationsFromDAG(all_nodes, uf_parent, filter_pairs);
 		forward_filter_ops = std::move(filter_ops.first);
 		backward_filter_ops = std::move(filter_ops.second);
+
+		RemoveRedundantPairs(filter_pairs, forward_filter_ops, backward_filter_ops);
+
 	} else {
 		// largest_root
 		mst_edges = LargestRoot(edges);

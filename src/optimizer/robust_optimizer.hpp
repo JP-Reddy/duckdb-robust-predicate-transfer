@@ -71,6 +71,10 @@ public:
 
 	unordered_map<ColumnBinding, ColumnBinding, ColumnBindingHashFunction> rename_col_bindings;
 
+	unordered_set<idx_t> table_with_filters;
+
+	bool exist_cycle = false;
+
 public:
 	// extract all the join edges from the plan
 	// vector<JoinEdge> ExtractOperators(LogicalOperator &plan, vector<LogicalOperator*> &join_ops);
@@ -124,6 +128,16 @@ public:
 
 	// pass 2: lift BF operator block above FILTER (handles all FILTER cases)
 	void LiftCreateFilterAboveFilter(unique_ptr<LogicalOperator> &plan);
+
+	unique_ptr<BaseStatistics> GetColumnStatistics(const ColumnBinding &binding);
+
+	bool HasFilteringLocalPredicate(const FilterOpPair &pair);
+
+	bool IsRedundant(const FilterOpPair &pair);
+
+	void RemoveRedundantPairs(vector<FilterOpPair> &filter_pairs,
+	                          unordered_map<LogicalOperator *, vector<FilterOperation>> &forward_filter_ops,
+	                          unordered_map<LogicalOperator *, vector<FilterOperation>> &backward_filter_ops);
 
 	// resolve column binding through rename chain to get base table binding
 	ColumnBinding ResolveColumnBinding(const ColumnBinding &binding) const;
