@@ -22,6 +22,10 @@
 #include <duckdb/planner/expression/bound_function_expression.hpp>
 #include "duckdb/storage/statistics/base_statistics.hpp"
 #include "duckdb/storage/statistics/numeric_stats.hpp"
+#include "duckdb/catalog/catalog_entry/duck_table_entry.hpp"
+#include "duckdb/storage/data_table.hpp"
+#include "duckdb/storage/table/table_statistics.hpp"
+#include "duckdb/common/types/hyperloglog.hpp"
 
 namespace duckdb {
 // class LogicalCreateFilter;
@@ -1799,6 +1803,75 @@ unique_ptr<BaseStatistics> RobustOptimizerContextState::GetColumnStatistics(cons
 	return column_statistics;
 }
 
+idx_t RobustOptimizerContextState::GetBaseTableRowCount(const ColumnBinding &binding) {
+	auto resolved_binding = ResolveColumnBinding(binding);
+	auto table_it = table_mgr.table_lookup.find(resolved_binding.table_index);
+	if (table_it == table_mgr.table_lookup.end()) {
+		return DConstants::INVALID_INDEX;
+	}
+	auto *get = TableManager::FindLogicalGet(table_it->second.table_op);
+	if (!get || !get->function.cardinality) {
+		return DConstants::INVALID_INDEX;
+	}
+	auto table_stats = get->function.cardinality(context, get->bind_data.get());
+	if (!table_stats || !table_stats->has_estimated_cardinality) {
+		return DConstants::INVALID_INDEX;
+	}
+	return table_stats->estimated_cardinality;
+}
+
+unique_ptr<HyperLogLog> RobustOptimizerContextState::GetColumnHLL(const ColumnBinding &binding) {
+	auto resolved_binding = ResolveColumnBinding(binding);
+	auto table_it = table_mgr.table_lookup.find(resolved_binding.table_index);
+	if (table_it == table_mgr.table_lookup.end()) {
+		return nullptr;
+	}
+	auto *get = TableManager::FindLogicalGet(table_it->second.table_op);
+	if (!get) {
+		D_PRINTF("No matching base table found");
+		return nullptr;
+	}
+	auto table = get->GetTable();
+	if (!table || !table->IsDuckTable()) {
+		return nullptr;
+	}
+	const auto &column_id = get->GetColumnIds()[resolved_binding.column_index];
+	StorageIndex storage_index;
+	if (!get->TryGetStorageIndex(column_id, storage_index)) {
+		return nullptr;
+	}
+	auto &duck_table = table->Cast<DuckTableEntry>();
+	TableStatistics table_statistics;
+	duck_table.GetStorage().GetRowGroupCollection()->CopyStats(table_statistics);
+	auto stats_lock = table_statistics.GetLock();
+	auto &column_statistics = table_statistics.GetStats(*stats_lock, storage_index.GetPrimaryIndex());
+	if (!column_statistics.HasDistinctStats()) {
+		return nullptr;
+	}
+	auto &distinct_statistics = column_statistics.DistinctStats();
+	if (!distinct_statistics.log || distinct_statistics.sample_count.load() == 0 ||
+	    distinct_statistics.total_count.load() == 0) {
+		return nullptr;
+	}
+	return distinct_statistics.log->Copy();
+}
+
+// check HLL dominance as approximate evidence as whether probe side key set is contained in build side key set
+bool RobustOptimizerContextState::HLLDominates(const ColumnBinding &build_binding, const ColumnBinding &probe_binding) {
+	auto build_hll = GetColumnHLL(build_binding);
+	auto probe_hll = GetColumnHLL(probe_binding);
+	if (!build_hll || !probe_hll) {
+		return false;
+	}
+
+	for (idx_t i = 0; i < HyperLogLog::M; i++) {
+		if (build_hll->GetRegister(i) < probe_hll->GetRegister(i)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 enum class IncomingFilterStatus { NONE, ONE, MULTIPLE };
 
 struct TableFilterState {
@@ -1898,14 +1971,18 @@ bool RobustOptimizerContextState::IsRedundant(const FilterOpPair &pair) {
 		auto build_max = NumericStats::Max(*build_stats).GetValue<int64_t>();
 		auto probe_min = NumericStats::Min(*probe_stats).GetValue<int64_t>();
 		auto probe_max = NumericStats::Max(*probe_stats).GetValue<int64_t>();
-		auto build_ndv = build_stats->GetDistinctCount();
-		auto original_build_range = build_max - build_min + 1;
-		// if build range has holes, then not redundant
-		if (build_ndv != original_build_range) {
-			return false;
-		}
+
 		// if probe range is outside of build range, then not redundant
 		if (probe_min < build_min || probe_max > build_max) {
+			return false;
+		}
+		auto build_range = build_max - build_min + 1;
+		auto build_row_count = GetBaseTableRowCount(build_columns[i]);
+		bool redundant_by_row_count =
+		    build_row_count != DConstants::INVALID_INDEX && build_row_count == static_cast<idx_t>(build_range);
+		bool redundant_by_hll = HLLDominates(build_columns[i], probe_columns[i]);
+
+		if (!redundant_by_row_count && !redundant_by_hll) {
 			return false;
 		}
 	}
@@ -1943,6 +2020,7 @@ void RobustOptimizerContextState::RemoveRedundantPairs(
 			redundant = true;
 		}
 
+		// if a pair is marked as redundant, it will not be potentially filtering source for the next pair
 		if (redundant) {
 			remove_pair[pair_idx] = true;
 			continue;

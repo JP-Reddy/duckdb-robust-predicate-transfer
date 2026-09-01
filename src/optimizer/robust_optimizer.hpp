@@ -7,6 +7,7 @@
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/unordered_map.hpp"
 #include "duckdb/optimizer/optimizer_extension.hpp"
+#include "duckdb/common/types/hyperloglog.hpp"
 
 namespace duckdb {
 
@@ -130,6 +131,12 @@ public:
 	void LiftCreateFilterAboveFilter(unique_ptr<LogicalOperator> &plan);
 
 	unique_ptr<BaseStatistics> GetColumnStatistics(const ColumnBinding &binding);
+
+	idx_t GetBaseTableRowCount(const ColumnBinding &binding);
+
+	unique_ptr<HyperLogLog> GetColumnHLL(const ColumnBinding &binding);
+
+	bool HLLDominates(const ColumnBinding &build_binding, const ColumnBinding &probe_binding);
 
 	bool HasFilteringLocalPredicate(const FilterOpPair &pair);
 
