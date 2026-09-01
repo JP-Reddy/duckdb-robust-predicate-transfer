@@ -1962,7 +1962,7 @@ void RobustOptimizerContextState::RemoveRedundantPairs(
 		}
 
 		auto &pair = filter_pairs[pair_idx];
-		// RemoveFilterPair(pair, forward_filter_ops, backward_filter_ops);
+		RemoveFilterPair(pair, forward_filter_ops, backward_filter_ops);
 	}
 }
 unique_ptr<LogicalOperator> RobustOptimizerContextState::PreOptimize(unique_ptr<LogicalOperator> plan) {
