@@ -1980,14 +1980,15 @@ bool RobustOptimizerContextState::IsRedundant(const FilterOpPair &pair) {
 		auto build_row_count = GetBaseTableRowCount(build_columns[i]);
 		bool redundant_by_row_count =
 		    build_row_count != DConstants::INVALID_INDEX && build_row_count == static_cast<idx_t>(build_range);
+		if (redundant_by_row_count) {
+			return true;
+		}
 		bool redundant_by_hll = HLLDominates(build_columns[i], probe_columns[i]);
-
-		if (!redundant_by_row_count && !redundant_by_hll) {
-			return false;
+		if (redundant_by_hll) {
+			return true;
 		}
 	}
-
-	return true;
+	return false;
 }
 
 void RobustOptimizerContextState::RemoveRedundantPairs(
